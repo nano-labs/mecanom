@@ -11,15 +11,21 @@
 
 #include <movingAvg.h>
 
-const int E1 = 3; ///<Motor1 Speed
-const int E2 = 11;///<Motor2 Speed
-const int E3 = 5; ///<Motor3 Speed
-const int E4 = 6; ///<Motor4 Speed
+const int Motor1_IN1=5;
+const int Motor1_IN2=4;
+const int Motor1_Enable=6;
 
-const int M1 = 4; ///<Motor1 Direction
-const int M2 = 12;///<Motor2 Direction
-const int M3 = 8; ///<Motor3 Direction
-const int M4 = 7; ///<Motor4 Direction
+const int Motor2_IN3=8;
+const int Motor2_IN4=7;
+const int Motor2_Enable=9;
+
+const int Motor3_IN1=11;
+const int Motor3_IN2=10;
+const int Motor3_Enable=2;
+
+const int Motor4_IN3=13;
+const int Motor4_IN4=12;
+const int Motor4_Enable=3;
 
 int ch1 = 0;
 int ch2 = 0;
@@ -29,7 +35,7 @@ int ch5 = 0;
 
 bool calibrating = false;
 unsigned long calibration_start = 0;
-const int dead_center = 50;
+const int dead_center = 30;
 int ch1_min = 1283;
 int ch1_center = 1492;
 int ch1_max = 1720;
@@ -60,55 +66,25 @@ int calibration_led_state = LOW;
 const int calibration_switch = 34;
 unsigned long time_keeper = 0;
 
-void M1_advance(char Speed) ///<Motor1 Advance
-{
- digitalWrite(M1,LOW);
- analogWrite(E1,Speed);
-}
-void M2_advance(char Speed) ///<Motor2 Advance
-{
- digitalWrite(M2,HIGH);
- analogWrite(E2,Speed);
-}
-void M3_advance(char Speed) ///<Motor3 Advance
-{
- digitalWrite(M3,LOW);
- analogWrite(E3,Speed);
-}
-void M4_advance(char Speed) ///<Motor4 Advance
-{
- digitalWrite(M4,HIGH);
- analogWrite(E4,Speed);
-}
-
-void M1_back(char Speed) ///<Motor1 Back off
-{
- digitalWrite(M1,HIGH);
- analogWrite(E1,Speed);
-}
-void M2_back(char Speed) ///<Motor2 Back off
-{
- digitalWrite(M2,LOW);
- analogWrite(E2,Speed);
-}
-void M3_back(char Speed) ///<Motor3 Back off
-{
- digitalWrite(M3,HIGH);
- analogWrite(E3,Speed);
-}
-void M4_back(char Speed) ///<Motor4 Back off
-{
- digitalWrite(M4,LOW);
- analogWrite(E4,Speed);
-}
-
 
 
 void setup() {
-  for(int i=3;i<9;i++)
-    pinMode(i,OUTPUT);
-  for(int i=11;i<13;i++)
-    pinMode(i,OUTPUT);
+
+  pinMode(Motor1_IN1, OUTPUT);
+  pinMode(Motor1_IN2, OUTPUT);
+  pinMode(Motor1_Enable, OUTPUT);
+  
+  pinMode(Motor2_IN4, OUTPUT);
+  pinMode(Motor2_IN3, OUTPUT);
+  pinMode(Motor2_Enable, OUTPUT);
+
+  pinMode(Motor3_IN1, OUTPUT);
+  pinMode(Motor3_IN2, OUTPUT);
+  pinMode(Motor3_Enable, OUTPUT);
+  
+  pinMode(Motor4_IN4, OUTPUT);
+  pinMode(Motor4_IN3, OUTPUT);
+  pinMode(Motor4_Enable, OUTPUT);
 
   pinMode(ch1_pin, INPUT);
   pinMode(ch2_pin, INPUT);
@@ -218,87 +194,125 @@ void checkCalibration() {
 }
 
 void read_futaba() {
-  ch1 = map(pulseIn(ch1_pin, HIGH), ch1_min, ch1_max, -255, 255);
+  ch1 = map(pulseIn(ch1_pin, HIGH), ch1_min, ch1_max, -200, 200);
   if (ch1 <= dead_center && ch1 >= (dead_center * -1)) {
     ch1 = 0;
   }
-  ch2 = map(pulseIn(ch2_pin, HIGH), ch2_min, ch2_max, -255, 255);
+  ch2 = map(pulseIn(ch2_pin, HIGH), ch2_min, ch2_max, -200, 200);
   if (ch2 <= dead_center && ch2 >= (dead_center * -1)) {
     ch2 = 0;
   }
-  ch3 = map(pulseIn(ch3_pin, HIGH), ch3_min, ch3_max, -255, 255);
+  ch3 = map(pulseIn(ch3_pin, HIGH), ch3_min, ch3_max, -200, 200);
   if (ch3 <= dead_center && ch3 >= (dead_center * -1)) {
     ch3 = 0;
   }
-  ch4 = map(pulseIn(ch4_pin, HIGH), ch4_min, ch4_max, -255, 255);
+  ch4 = map(pulseIn(ch4_pin, HIGH), ch4_min, ch4_max, -200, 200);
   if (ch4 <= dead_center && ch4 >= (dead_center * -1)) {
     ch4 = 0;
   }
-  ch5 = map(pulseIn(ch5_pin, HIGH), ch5_min, ch5_max, -255, 255);
+  ch5 = map(pulseIn(ch5_pin, HIGH), ch5_min, ch5_max, -200, 200);
 
-  ch1 = max(min(ch1, 255), -255);
-  ch2 = max(min(ch2, 255), -255);
-  ch3 = max(min(ch3, 255), -255);
-  ch4 = max(min(ch4, 255), -255);
-  ch5 = max(min(ch5, 255), -255);
+  ch1 = max(min(ch1, 200), -200);
+  ch2 = max(min(ch2, 200), -200);
+  ch3 = max(min(ch3, 200), -200);
+  ch4 = max(min(ch4, 200), -200);
+  ch5 = max(min(ch5, 200), -200);
+  if (ch5 > 0) {
+    ch1 = ch1 * 0.5;
+    ch2 = ch2 * 0.5;
+    ch3 = ch3 * 0.5;
+    ch4 = ch4 * 0.5;
+  }
 
 //  Serial.println(String(ch1) +", "+ String(ch2) +", "+ String(ch3) +", "+ String(ch4) +", "+ String(ch5));
 //  Serial.println(String(ch5));
 //  delay(500);
 }
 
+void MoveMotor1(int speed) {
+  if (speed == 0) {
+     digitalWrite(Motor1_IN1, LOW);
+     digitalWrite(Motor1_IN2, LOW);
+  } else if (speed > 1) {
+     digitalWrite(Motor1_IN1,HIGH);
+     digitalWrite(Motor1_IN2,LOW);
+     analogWrite(Motor1_Enable,speed);
+  } else {
+     digitalWrite(Motor1_IN1,LOW);
+     digitalWrite(Motor1_IN2,HIGH);
+     analogWrite(Motor1_Enable,speed * -1);  
+  }
+}
+
+void MoveMotor2(int speed) {
+  if (speed == 0) {
+     digitalWrite(Motor2_IN3, LOW);
+     digitalWrite(Motor2_IN4, LOW);
+  } else if (speed > 1) {
+     digitalWrite(Motor2_IN3,HIGH);
+     digitalWrite(Motor2_IN4,LOW);
+     analogWrite(Motor2_Enable,speed);
+  } else {
+     digitalWrite(Motor2_IN3,LOW);
+     digitalWrite(Motor2_IN4,HIGH);
+     analogWrite(Motor2_Enable,speed * -1);  
+  }
+}
+
+void MoveMotor3(int speed) {
+  if (speed == 0) {
+     digitalWrite(Motor3_IN1, LOW);
+     digitalWrite(Motor3_IN2, LOW);
+  } else if (speed > 1) {
+     digitalWrite(Motor3_IN1,HIGH);
+     digitalWrite(Motor3_IN2,LOW);
+     analogWrite(Motor3_Enable,speed);
+  } else {
+     digitalWrite(Motor3_IN1,LOW);
+     digitalWrite(Motor3_IN2,HIGH);
+     analogWrite(Motor3_Enable,speed * -1);  
+  }
+}
+
+void MoveMotor4(int speed) {
+  if (speed == 0) {
+     digitalWrite(Motor4_IN3, LOW);
+     digitalWrite(Motor4_IN4, LOW);
+  } else if (speed > 1) {
+     digitalWrite(Motor4_IN3,HIGH);
+     digitalWrite(Motor4_IN4,LOW);
+     analogWrite(Motor4_Enable,speed);
+  } else {
+     digitalWrite(Motor4_IN3,LOW);
+     digitalWrite(Motor4_IN4,HIGH);
+     analogWrite(Motor4_Enable,speed * -1);  
+  }
+}
 void move() {
   read_futaba();
-
-  if (ch1 >= 20) {
-    M1_advance(ch1);
-  } else if (ch1 <= 20) {
-    M1_back(ch1 * -1);
-  } else {
-    M1_advance(0);
-  }
-
-  if (ch2 >= 20) {
-    M2_advance(ch2);
-  } else if (ch2 <= 20) {
-    M2_back(ch2 * -1);
-  } else {
-    M2_advance(0);
-  }
-
-  if (ch3 >= 20) {
-    M3_advance(ch3);
-  } else if (ch3 <= 20) {
-    M3_back(ch3 * -1);
-  } else {
-    M3_advance(0);
-  }
-
-  if (ch4 >= 20) {
-    M4_advance(ch4);
-  } else if (ch4 <= 20) {
-    M4_back(ch4 * -1);
-  } else {
-    M4_advance(0);
-  }
+  MoveMotor1(ch2);
+  MoveMotor2(ch3);
+  MoveMotor3(ch1);
+  MoveMotor4(ch4);
 
 }
 void loop() {
-//  digitalWrite(calibration_led, LOW);
-//  move();
   checkCalibration();
-  read_futaba();
-//  M1_advance(255);
-//  M2_advance(255);
-//  M3_advance(255);
-//  M4_advance(255);
-//  delay(2000); ///<Delay 2S
-//  M1_back(255);
-//  M2_back(255);
-//  M3_back(255);
-//  M4_back(255);
-//  delay(2000); ///<Delay 2S
-
-//  Serial.println(String(ch1) +", "+ String(ch2) +", "+ String(ch3) +", "+ String(ch4) +", "+ String(ch5));
+  move();
 
 }
+
+//void loop() {
+// Motor1_Brake();
+// Motor2_Brake();
+// delay(2000);
+// Motor1_Forward(200);
+// Motor2_Forward(200);
+// delay(5000);
+// Motor1_Brake();
+// Motor2_Brake();
+// delay(2000);
+// Motor1_Backward(200);
+// Motor2_Backward(200);
+// delay(5000);
+//}
