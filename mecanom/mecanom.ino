@@ -35,7 +35,7 @@ int ch5 = 0;
 
 bool calibrating = false;
 unsigned long calibration_start = 0;
-const int dead_center = 30;
+const int dead_center = 50;
 int ch1_min = 1283;
 int ch1_center = 1492;
 int ch1_max = 1720;
@@ -55,11 +55,21 @@ int ch4_max = 1682;
 int ch5_min = 987;
 int ch5_max = 1977;
 
-const int ch5_pin = 22;
-const int ch2_pin = 24;
+const int max_limit = 180;
+const int min_limit = -180;
+int direction = 1;
+
+
+// ch1: left horizontal stick
+// ch2: left vertical stick
+// ch3: right vertical stick
+// ch4: right horizontal stick
+// ch5: 2 position switch
 const int ch1_pin = 26;
+const int ch2_pin = 24;
 const int ch3_pin = 28;
 const int ch4_pin = 30;
+const int ch5_pin = 22;
 
 const int calibration_led = 32;
 int calibration_led_state = LOW;
@@ -193,30 +203,52 @@ void checkCalibration() {
   }  
 }
 
-void read_futaba() {
-  ch1 = map(pulseIn(ch1_pin, HIGH), ch1_min, ch1_max, -200, 200);
+void readFutaba() {
+  // ch1: left horizontal stick
+  // ch2: left vertical stick
+  // ch3: right vertical stick
+  // ch4: right horizontal stick
+  // ch5: 2 position switch
+  
+  ch1 = map(pulseIn(ch1_pin, HIGH), ch1_min, ch1_max, min_limit, max_limit);
   if (ch1 <= dead_center && ch1 >= (dead_center * -1)) {
     ch1 = 0;
+  } else if (ch1 > dead_center) {
+    ch1 = ch1 - dead_center;
+  } else {
+    ch1 = ch1 + dead_center;
   }
-  ch2 = map(pulseIn(ch2_pin, HIGH), ch2_min, ch2_max, -200, 200);
+  ch2 = map(pulseIn(ch2_pin, HIGH), ch2_min, ch2_max, min_limit, max_limit);
   if (ch2 <= dead_center && ch2 >= (dead_center * -1)) {
     ch2 = 0;
+  } else if (ch2 > dead_center) {
+    ch2 = ch2 - dead_center;
+  } else {
+    ch2 = ch2 + dead_center;
   }
-  ch3 = map(pulseIn(ch3_pin, HIGH), ch3_min, ch3_max, -200, 200);
+  ch3 = map(pulseIn(ch3_pin, HIGH), ch3_min, ch3_max, min_limit, max_limit);
   if (ch3 <= dead_center && ch3 >= (dead_center * -1)) {
     ch3 = 0;
+  } else if (ch3 > dead_center) {
+    ch3 = ch3 - dead_center;
+  } else {
+    ch3 = ch3 + dead_center;
   }
-  ch4 = map(pulseIn(ch4_pin, HIGH), ch4_min, ch4_max, -200, 200);
+  ch4 = map(pulseIn(ch4_pin, HIGH), ch4_min, ch4_max, max_limit, min_limit);
   if (ch4 <= dead_center && ch4 >= (dead_center * -1)) {
     ch4 = 0;
+  } else if (ch4 > dead_center) {
+    ch4 = ch4 - dead_center;
+  } else {
+    ch4 = ch4 + dead_center;
   }
-  ch5 = map(pulseIn(ch5_pin, HIGH), ch5_min, ch5_max, -200, 200);
+  ch5 = map(pulseIn(ch5_pin, HIGH), ch5_min, ch5_max, min_limit, max_limit);
 
-  ch1 = max(min(ch1, 200), -200);
-  ch2 = max(min(ch2, 200), -200);
-  ch3 = max(min(ch3, 200), -200);
-  ch4 = max(min(ch4, 200), -200);
-  ch5 = max(min(ch5, 200), -200);
+  ch1 = max(min(ch1, max_limit), min_limit);
+  ch2 = max(min(ch2, max_limit), min_limit);
+  ch3 = max(min(ch3, max_limit), min_limit);
+  ch4 = max(min(ch4, max_limit), min_limit);
+  ch5 = max(min(ch5, max_limit), min_limit);
   if (ch5 > 0) {
     ch1 = ch1 * 0.5;
     ch2 = ch2 * 0.5;
@@ -229,7 +261,9 @@ void read_futaba() {
 //  delay(500);
 }
 
+// back right
 void MoveMotor1(int speed) {
+  speed = max(min(speed, 255), -255);
   if (speed == 0) {
      digitalWrite(Motor1_IN1, LOW);
      digitalWrite(Motor1_IN2, LOW);
@@ -244,7 +278,9 @@ void MoveMotor1(int speed) {
   }
 }
 
+// back left
 void MoveMotor2(int speed) {
+  speed = max(min(speed, 255), -255);
   if (speed == 0) {
      digitalWrite(Motor2_IN3, LOW);
      digitalWrite(Motor2_IN4, LOW);
@@ -259,7 +295,9 @@ void MoveMotor2(int speed) {
   }
 }
 
+// front left
 void MoveMotor3(int speed) {
+  speed = max(min(speed, 255), -255);
   if (speed == 0) {
      digitalWrite(Motor3_IN1, LOW);
      digitalWrite(Motor3_IN2, LOW);
@@ -274,7 +312,9 @@ void MoveMotor3(int speed) {
   }
 }
 
+// front right
 void MoveMotor4(int speed) {
+  speed = max(min(speed, 255), -255);
   if (speed == 0) {
      digitalWrite(Motor4_IN3, LOW);
      digitalWrite(Motor4_IN4, LOW);
@@ -285,34 +325,98 @@ void MoveMotor4(int speed) {
   } else {
      digitalWrite(Motor4_IN3,LOW);
      digitalWrite(Motor4_IN4,HIGH);
-     analogWrite(Motor4_Enable,speed * -1);  
+     analogWrite(Motor4_Enable,(speed)* -1);  
   }
 }
 void move() {
-  read_futaba();
-  MoveMotor1(ch2);
-  MoveMotor2(ch3);
-  MoveMotor3(ch1);
-  MoveMotor4(ch4);
+  readFutaba();
+  // ch1: left horizontal stick
+  // ch2: left vertical stick
+  // ch3: right vertical stick
+  // ch4: right horizontal stick
+  // ch5: 2 position switch
+
+  if (ch2 != 0) {
+    // left vertical stick
+    int m1 = ch2;
+    int m2 = ch2;
+    int m3 = ch2;
+    int m4 = ch2;
+    if (ch2 > 0) {
+      direction = -1;
+    } else {
+      direction = 1;
+    }
+    if (ch1 != 0) {
+      // forward + some side movements
+      m1 = m1 + (ch1 * -1);
+      m2 = m2 + ch1;
+      m3 = m3 + (ch1 * -1);
+      m4 = m4 + ch1;
+    };
+    if (ch4 != 0) {
+      // forward + some rotational movement
+      m1 = m1 + (ch4 * 0.5 * direction);
+      m2 = m2 + (ch4 * -0.5 * direction);
+      m3 = m3 + (ch4 * -0.5 * direction);
+      m4 = m4 + (ch4 * 0.5 * direction);
+    };
+    if (direction == 1) {
+      m1 = min(m1, -1);  
+      m2 = min(m2, -1);  
+      m3 = min(m3, -1);  
+      m4 = min(m4, -1);  
+    } else {
+      m1 = max(m1, 1);  
+      m2 = max(m2, 1);  
+      m3 = max(m3, 1);  
+      m4 = max(m4, 1);  
+    }
+    MoveMotor1(m1);
+    MoveMotor2(m2);
+    MoveMotor3(m3);
+    MoveMotor4(m4);
+    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
+
+  } else if (ch4 != 0) {
+    int m1 = ch4 * 0.5;
+    int m2 = ch4 * -0.5;
+    int m3 = ch4 * -0.5;
+    int m4 = ch4 * 0.5;
+    // right horizontal stick
+    if (ch1 != 0) {
+      // rotational + side movement
+      m1 = m1 + (ch1 * -1);
+      m2 = m2 + ch1;
+      m3 = m3 + (ch1 * -1);
+      m4 = m4 + ch1;
+    }
+    MoveMotor1(m1);
+    MoveMotor2(m2);
+    MoveMotor3(m3);
+    MoveMotor4(m4);
+    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
+  } else if (ch1 != 0) {
+    int m1 = ch1 * -1;
+    int m2 = ch1;
+    int m3 = ch1 * -1;
+    int m4 = ch1;
+    // pure side movement
+    MoveMotor1(m1); 
+    MoveMotor2(m2); 
+    MoveMotor3(m3); 
+    MoveMotor4(m4); 
+    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
+  } else {
+    MoveMotor1(0);
+    MoveMotor2(0);
+    MoveMotor3(0);
+    MoveMotor4(0);
+  }
 
 }
 void loop() {
-  checkCalibration();
+//  checkCalibration();
+//readFutaba();
   move();
-
 }
-
-//void loop() {
-// Motor1_Brake();
-// Motor2_Brake();
-// delay(2000);
-// Motor1_Forward(200);
-// Motor2_Forward(200);
-// delay(5000);
-// Motor1_Brake();
-// Motor2_Brake();
-// delay(2000);
-// Motor1_Backward(200);
-// Motor2_Backward(200);
-// delay(5000);
-//}
