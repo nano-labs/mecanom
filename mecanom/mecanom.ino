@@ -27,6 +27,13 @@ const int Motor4_IN3=13;
 const int Motor4_IN4=12;
 const int Motor4_Enable=3;
 
+int motorSpeeds[4] = {0, 0, 0, 0};
+int motorInputs[4] = {0, 0, 0, 0};
+int motorTargetSpeeds[4] = {0, 0, 0, 0};
+unsigned long motorPos[4] = {0, 0, 0, 0};
+int motorPosPins[4] = {43, 44, 45, 46};
+unsigned long motorLastReads[4] = {0, 0, 0, 0};
+
 int ch1 = 0;
 int ch2 = 0;
 int ch3 = 0;
@@ -36,27 +43,23 @@ int ch5 = 0;
 bool calibrating = false;
 unsigned long calibration_start = 0;
 const int dead_center = 50;
-int ch1_min = 1283;
-int ch1_center = 1492;
-int ch1_max = 1720;
+int ch1_min = 1035;
+int ch1_max = 1880;
 
-int ch2_min = 1061;
-int ch2_center = 0;
-int ch2_max = 1694;
+int ch2_min = 1045;
+int ch2_max = 1920;
 
-int ch3_min = 1263;
-int ch3_center = 1507;
-int ch3_max = 1716;
+int ch3_min = 1055;
+int ch3_max = 1895;
 
-int ch4_min = 1290;
-int ch4_center = 1468;
-int ch4_max = 1682;
+int ch4_min = 1100;
+int ch4_max = 1880;
 
 int ch5_min = 987;
-int ch5_max = 1977;
+int ch5_max = 1960;
 
-const int max_limit = 180;
-const int min_limit = -180;
+const int max_limit = 250;
+const int min_limit = -250;
 int direction = 1;
 
 
@@ -76,13 +79,17 @@ int calibration_led_state = LOW;
 const int calibration_switch = 34;
 unsigned long time_keeper = 0;
 
-
+movingAvg s(20);
+movingAvg t(20);
+movingAvg p(20);
 
 void setup() {
 
   pinMode(Motor1_IN1, OUTPUT);
   pinMode(Motor1_IN2, OUTPUT);
   pinMode(Motor1_Enable, OUTPUT);
+  motorPos[0] = map(pulseIn(motorPosPins[0], HIGH), 0, 850, 0, 360);
+  motorLastReads[0] = millis();
   
   pinMode(Motor2_IN4, OUTPUT);
   pinMode(Motor2_IN3, OUTPUT);
@@ -105,102 +112,34 @@ void setup() {
   pinMode(calibration_led, OUTPUT);
 
   Serial.begin(9600); // Pour a bowl of Serial
+  delay(3000);
 //  calibrate();
   digitalWrite(calibration_led, LOW);
+  s.begin();
+  t.begin();
+  p.begin();
 
 }
 
 void checkCalibration() {
-  if (digitalRead(calibration_switch) == LOW) {
-    digitalWrite(calibration_led, HIGH);
-    if (calibrating == false) {
-      // push down the switch
-      calibration_start = millis();
-      calibrating = true;
-    } else {
-      if (millis() - calibration_start >= 3000) {
-        // 3 seconds
-        // Actual calibration
-        digitalWrite(calibration_led, LOW);
-        calibration_start = millis();
-        time_keeper = millis();
-        movingAvg ch1_avg(10);
-        movingAvg ch2_avg(10);
-        movingAvg ch3_avg(10);
-        movingAvg ch4_avg(10);
-        movingAvg ch5_avg(10);
-        ch1_avg.begin();
-        ch2_avg.begin();
-        ch3_avg.begin();
-        ch4_avg.begin();
-        ch5_avg.begin();
-        while(millis() - calibration_start <= 3000) {
-          // calibrate center
-          ch1_avg.reading(pulseIn(ch1_pin, HIGH));
-          ch2_avg.reading(pulseIn(ch2_pin, HIGH));
-          ch3_avg.reading(pulseIn(ch3_pin, HIGH));
-          ch4_avg.reading(pulseIn(ch4_pin, HIGH));
-          ch1_center = ch1_avg.getAvg();
-          ch2_center = ch2_avg.getAvg();
-          ch3_center = ch3_avg.getAvg();
-          ch4_center = ch4_avg.getAvg();
-        }
-        ch1_min = 3000;
-        ch1_max = 0;
-        ch2_min = 3000;
-        ch2_max = 0;
-        ch3_min = 3000;
-        ch3_max = 0;
-        ch4_min = 3000;
-        ch4_max = 0;
-        ch5_min = 3000;
-        ch5_max = 0;
-        ch1_avg.reset();
-        ch2_avg.reset();
-        ch3_avg.reset();
-        ch4_avg.reset();
-        ch5_avg.reset();
-        time_keeper = millis();
-        while (digitalRead(calibration_switch) == HIGH) {
-          // calibrate extremes
-          if (millis() - time_keeper >= 200) {
-            if (calibration_led_state == LOW) {
-              calibration_led_state = HIGH;
-            } else {
-              calibration_led_state = LOW;
-            }
-            digitalWrite(calibration_led, calibration_led_state);
-            time_keeper = millis();
-          }
-          // calibrate extremes
-          ch1_avg.reading(pulseIn(ch1_pin, HIGH));
-          ch1_min = min(ch1_avg.getAvg(), ch1_min);
-          ch1_max = max(ch1_avg.getAvg(), ch1_max);
-          ch2_avg.reading(pulseIn(ch2_pin, HIGH));
-          ch2_min = min(ch2_avg.getAvg(), ch2_min);
-          ch2_max = max(ch2_avg.getAvg(), ch2_max);
-          ch3_avg.reading(pulseIn(ch3_pin, HIGH));
-          ch3_min = min(ch3_avg.getAvg(), ch3_min);
-          ch3_max = max(ch3_avg.getAvg(), ch3_max);
-          ch4_avg.reading(pulseIn(ch4_pin, HIGH));
-          ch4_min = min(ch4_avg.getAvg(), ch4_min);
-          ch4_max = max(ch4_avg.getAvg(), ch4_max);
-
-          ch5_avg.reading(pulseIn(ch5_pin, HIGH));
-          ch5_min = min(ch5_avg.getAvg(), ch5_min);
-          ch5_max = max(ch5_avg.getAvg(), ch5_max);
-          
-//          Serial.println(String(pulseIn(ch5_pin, HIGH)) + ", " + String(ch5_avg.getAvg()) + ", " + String(ch5_min) + ", " + String(ch5_max));
-//          Serial.println(String(ch1_min) +", "+ String(ch1_max) +", "+ String(ch2_min) +", "+ String(ch2_max) +", "+ String(ch3_min) +", "+ String(ch3_max) +", "+ String(ch4_min) +", "+ String(ch4_max)+", "+ String(ch5_min) +", "+ String(ch5_max) );
-        }
-        digitalWrite(calibration_led, LOW);
-        calibrating = false;
-      }
-    }
-  } else {
-    calibrating = false;
-    digitalWrite(calibration_led, LOW);
-  }  
+  movingAvg ch1_avg(20);
+  movingAvg ch2_avg(20);
+  movingAvg ch3_avg(20);
+  movingAvg ch4_avg(20);
+  movingAvg ch5_avg(20);
+  ch1_avg.begin();
+  ch2_avg.begin();
+  ch3_avg.begin();
+  ch4_avg.begin();
+  ch5_avg.begin();
+  while (true) {
+    ch1_avg.reading(pulseIn(ch1_pin, HIGH));
+    ch2_avg.reading(pulseIn(ch2_pin, HIGH));
+    ch3_avg.reading(pulseIn(ch3_pin, HIGH));
+    ch4_avg.reading(pulseIn(ch4_pin, HIGH));
+    ch5_avg.reading(pulseIn(ch5_pin, HIGH));
+    Serial.println(String(ch1_avg.getAvg()) + ", " + String(ch2_avg.getAvg()) + ", " + String(ch3_avg.getAvg()) + ", " + String(ch4_avg.getAvg()) + ", " + String(ch5_avg.getAvg()));
+  }
 }
 
 void readFutaba() {
@@ -226,7 +165,7 @@ void readFutaba() {
   } else {
     ch2 = ch2 + dead_center;
   }
-  ch3 = map(pulseIn(ch3_pin, HIGH), ch3_min, ch3_max, min_limit, max_limit);
+  ch3 = map(pulseIn(ch3_pin, HIGH), ch3_min, ch3_max, max_limit, min_limit);
   if (ch3 <= dead_center && ch3 >= (dead_center * -1)) {
     ch3 = 0;
   } else if (ch3 > dead_center) {
@@ -234,7 +173,7 @@ void readFutaba() {
   } else {
     ch3 = ch3 + dead_center;
   }
-  ch4 = map(pulseIn(ch4_pin, HIGH), ch4_min, ch4_max, max_limit, min_limit);
+  ch4 = map(pulseIn(ch4_pin, HIGH), ch4_min, ch4_max, min_limit, max_limit);
   if (ch4 <= dead_center && ch4 >= (dead_center * -1)) {
     ch4 = 0;
   } else if (ch4 > dead_center) {
@@ -415,8 +354,53 @@ void move() {
   }
 
 }
+void readSpeed(int motor) {
+    unsigned long new_pos = min(max(map(pulseIn(motorPosPins[motor], HIGH), 0, 850, 0, 360), 0), 360);
+    unsigned long new_read = millis();
+    int delta = 0;
+    if (new_pos >= motorPos[motor] && motorTargetSpeeds[motor] > 0) {
+      delta = new_pos - motorPos[motor];
+    } else if (new_pos <= motorPos[motor] && motorTargetSpeeds[motor] < 0) {
+      delta = (motorPos[motor] - new_pos) * -1;
+    }
+    if (delta != 0) {
+      motorSpeeds[motor] = map((delta * 100) / (new_read - motorLastReads[motor]), -140, 140, -255, 255);
+    }
+    motorPos[motor] = new_pos;
+    motorLastReads[motor] = new_read;
+}
+
+void setSpeed(int motor, int speed) {
+  readSpeed(motor);
+  motorTargetSpeeds[motor] = speed;
+  if (speed == 0) {
+    motorInputs[motor] = 0;
+    motorSpeeds[motor] = 0;
+  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] > 25) {
+    motorInputs[motor] = motorInputs[motor] - 5;
+  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] < -25) {
+    motorInputs[motor] = motorInputs[motor] + 5;  
+  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] > 10) {
+    motorInputs[motor] = motorInputs[motor] - 3;
+  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] < -10) {
+    motorInputs[motor] = motorInputs[motor] + 3;  
+  }
+  motorInputs[motor] = min(max(motorInputs[motor], -255), 255);
+  MoveMotor1(motorInputs[motor]);
+}
+
 void loop() {
 //  checkCalibration();
-//readFutaba();
-  move();
+  readFutaba();
+//  readSpeed(0);
+//  move();
+//  MoveMotor1(ch3);
+//  Serial.println(pulseIn(Motor1_pos, HIGH));
+  setSpeed(0, ch3);
+  s.reading(motorSpeeds[0]);
+  t.reading(motorTargetSpeeds[0]);
+  p.reading(motorInputs[0]);
+  Serial.println(String(t.getAvg()) + ", " + String(s.getAvg()) + ", " + String(p.getAvg()));
+//  Serial.println(String(motorTargetSpeeds[0]) + ", " + String(motorSpeeds[0]) + ", " + String(motorInputs[0]));
+
 }
