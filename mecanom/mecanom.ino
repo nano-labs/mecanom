@@ -1,37 +1,44 @@
-/*!
-* @file QuadMotorDriverShield.ino
-* @brief QuadMotorDriverShield.ino  Motor control program
-*
-* Every 2 seconds to control motor positive inversion
-*
-* @author linfeng(490289303@qq.com)
-* @version  V1.0
-* @date  2016-4-5
-*/
 
 #include <movingAvg.h>
 
-const int Motor1_IN1=5;
-const int Motor1_IN2=4;
-const int Motor1_Enable=6;
+const int Motor1_IN1=6;
+const int Motor1_IN2=5;
+const int Motor1_Enable=7;
 
-const int Motor2_IN3=8;
-const int Motor2_IN4=7;
-const int Motor2_Enable=9;
+const int Motor2_IN3=3;
+const int Motor2_IN4=4;
+const int Motor2_Enable=2;
 
-const int Motor3_IN1=11;
-const int Motor3_IN2=10;
-const int Motor3_Enable=2;
+const int Motor3_IN1=12;
+const int Motor3_IN2=11;
+const int Motor3_Enable=13;
 
-const int Motor4_IN3=13;
-const int Motor4_IN4=12;
-const int Motor4_Enable=3;
+const int Motor4_IN3=9;
+const int Motor4_IN4=10;
+const int Motor4_Enable=8;
+
+//=================÷
+//const int Motor1_IN1=9;
+//const int Motor1_IN2=10;
+//const int Motor1_Enable=8;
+//
+//const int Motor2_IN3=12;
+//const int Motor2_IN4=11;
+//const int Motor2_Enable=13;
+//
+//const int Motor3_IN1=3;
+//const int Motor3_IN2=4;
+//const int Motor3_Enable=2;
+//
+//const int Motor4_IN3=6;
+//const int Motor4_IN4=5;
+//const int Motor4_Enable=7;
 
 int motorSpeeds[4] = {0, 0, 0, 0};
 int motorInputs[4] = {0, 0, 0, 0};
 int motorTargetSpeeds[4] = {0, 0, 0, 0};
 unsigned long motorPos[4] = {0, 0, 0, 0};
-int motorPosPins[4] = {43, 44, 45, 46};
+int motorPosPins[4] = {32, 34, 36, 50};
 unsigned long motorLastReads[4] = {0, 0, 0, 0};
 
 int ch1 = 0;
@@ -68,15 +75,12 @@ int direction = 1;
 // ch3: right vertical stick
 // ch4: right horizontal stick
 // ch5: 2 position switch
-const int ch1_pin = 26;
-const int ch2_pin = 24;
-const int ch3_pin = 28;
-const int ch4_pin = 30;
+const int ch1_pin = 30;
+const int ch2_pin = 28;
+const int ch3_pin = 26;
+const int ch4_pin = 24;
 const int ch5_pin = 22;
 
-const int calibration_led = 32;
-int calibration_led_state = LOW;
-const int calibration_switch = 34;
 unsigned long time_keeper = 0;
 
 movingAvg s(20);
@@ -108,13 +112,10 @@ void setup() {
   pinMode(ch3_pin, INPUT);
   pinMode(ch4_pin, INPUT);
   pinMode(ch5_pin, INPUT);
-  pinMode(calibration_switch, INPUT_PULLUP);
-  pinMode(calibration_led, OUTPUT);
 
-  Serial.begin(9600); // Pour a bowl of Serial
+  Serial.begin(57600); // Pour a bowl of Serial
   delay(3000);
 //  calibrate();
-  digitalWrite(calibration_led, LOW);
   s.begin();
   t.begin();
   p.begin();
@@ -157,7 +158,7 @@ void readFutaba() {
   } else {
     ch1 = ch1 + dead_center;
   }
-  ch2 = map(pulseIn(ch2_pin, HIGH), ch2_min, ch2_max, min_limit, max_limit);
+  ch2 = map(pulseIn(ch2_pin, HIGH), ch2_min, ch2_max, max_limit, min_limit);
   if (ch2 <= dead_center && ch2 >= (dead_center * -1)) {
     ch2 = 0;
   } else if (ch2 > dead_center) {
@@ -311,11 +312,15 @@ void move() {
       m3 = max(m3, 1);  
       m4 = max(m4, 1);  
     }
-    MoveMotor1(m1);
-    MoveMotor2(m2);
-    MoveMotor3(m3);
-    MoveMotor4(m4);
-    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
+    setSpeed(0, m1);
+    setSpeed(1, m2);
+    setSpeed(2, m3);
+    setSpeed(3, m4);
+//    MoveMotor1(m1);
+//    MoveMotor2(m2);
+//    MoveMotor3(m3);
+//    MoveMotor4(m4);
+//    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
 
   } else if (ch4 != 0) {
     int m1 = ch4 * 0.5;
@@ -330,41 +335,87 @@ void move() {
       m3 = m3 + (ch1 * -1);
       m4 = m4 + ch1;
     }
-    MoveMotor1(m1);
-    MoveMotor2(m2);
-    MoveMotor3(m3);
-    MoveMotor4(m4);
-    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
+    setSpeed(0, m1);
+    setSpeed(1, m2);
+    setSpeed(2, m3);
+    setSpeed(3, m4);
+//    MoveMotor1(m1);
+//    MoveMotor2(m2);
+//    MoveMotor3(m3);
+//    MoveMotor4(m4);
+//    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
   } else if (ch1 != 0) {
     int m1 = ch1 * -1;
     int m2 = ch1;
     int m3 = ch1 * -1;
     int m4 = ch1;
     // pure side movement
-    MoveMotor1(m1); 
-    MoveMotor2(m2); 
-    MoveMotor3(m3); 
-    MoveMotor4(m4); 
-    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
+    setSpeed(0, m1);
+    setSpeed(1, m2);
+    setSpeed(2, m3);
+    setSpeed(3, m4);
+//    MoveMotor1(m1); 
+//    MoveMotor2(m2); 
+//    MoveMotor3(m3); 
+//    MoveMotor4(m4); 
+//    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
   } else {
-    MoveMotor1(0);
-    MoveMotor2(0);
-    MoveMotor3(0);
-    MoveMotor4(0);
+    setSpeed(0, 0);
+    setSpeed(1, 0);
+    setSpeed(2, 0);
+    setSpeed(3, 0);
+//    MoveMotor1(0);
+//    MoveMotor2(0);
+//    MoveMotor3(0);
+//    MoveMotor4(0);
   }
 
 }
 void readSpeed(int motor) {
-    unsigned long new_pos = min(max(map(pulseIn(motorPosPins[motor], HIGH), 0, 850, 0, 360), 0), 360);
+//    Serial.println(pulseIn(motorPosPins[motor], HIGH));
+    unsigned long new_pos = min(max(map(pulseIn(motorPosPins[motor], HIGH), 0, 900, 0, 3600), 0), 3600);
     unsigned long new_read = millis();
+//        Serial.println(String(new_pos) + "," + String(motorPos[motor]));
     int delta = 0;
-    if (new_pos >= motorPos[motor] && motorTargetSpeeds[motor] > 0) {
-      delta = new_pos - motorPos[motor];
-    } else if (new_pos <= motorPos[motor] && motorTargetSpeeds[motor] < 0) {
-      delta = (motorPos[motor] - new_pos) * -1;
+    int target = motorTargetSpeeds[motor];
+    if (motor == 0 || motor == 3) {
+      if (target > 0) {
+        if (new_pos >= motorPos[motor]) {
+          delta = new_pos - motorPos[motor];
+        } else {
+          delta = new_pos + (3600 - motorPos[motor]);
+        }
+      } else if (target < 0) {
+        if (new_pos < motorPos[motor]) {
+          delta = (motorPos[motor] - new_pos) * -1;
+        } else {
+          delta = (motorPos[motor] + (3600 - new_pos)) * -1;
+        }
+      }
+    } else {
+      if (target < 0) {
+        if (new_pos >= motorPos[motor]) {
+          delta = (new_pos - motorPos[motor]) * -1;
+        } else {
+          delta = (new_pos + (3600 - motorPos[motor])) * -1;
+        }
+      } else if (target > 0) {
+        if (new_pos < motorPos[motor]) {
+          delta = motorPos[motor] - new_pos;
+        } else {
+          delta = motorPos[motor] + (3600 - new_pos);
+        }
+      }
     }
-    if (delta != 0) {
-      motorSpeeds[motor] = map((delta * 100) / (new_read - motorLastReads[motor]), -140, 140, -255, 255);
+    
+    if (delta != 0 && delta < 2000 && delta > -2000) {
+//      Serial.println(delta);
+      int speed = map((abs(delta) * 10) / (new_read - motorLastReads[motor]), -140, 140, -255, 255);
+//      int speed = (abs(delta) * 10) / (new_read - motorLastReads[motor]);
+      if (delta < 0) {
+        speed = speed * -1;  
+      }
+      motorSpeeds[motor] = speed;
     }
     motorPos[motor] = new_pos;
     motorLastReads[motor] = new_read;
@@ -380,27 +431,57 @@ void setSpeed(int motor, int speed) {
     motorInputs[motor] = motorInputs[motor] - 5;
   } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] < -25) {
     motorInputs[motor] = motorInputs[motor] + 5;  
-  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] > 10) {
+  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] > 5) {
     motorInputs[motor] = motorInputs[motor] - 3;
-  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] < -10) {
+  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] < -5) {
     motorInputs[motor] = motorInputs[motor] + 3;  
   }
   motorInputs[motor] = min(max(motorInputs[motor], -255), 255);
-  MoveMotor1(motorInputs[motor]);
+  if (motor == 0) {
+    MoveMotor1(motorInputs[motor]);
+  } else if (motor == 1) {
+    MoveMotor2(motorInputs[motor]);
+  } else if (motor == 2) {
+    MoveMotor3(motorInputs[motor]);
+  } else if (motor == 3) {
+    MoveMotor4(motorInputs[motor]);
+  }
 }
 
 void loop() {
 //  checkCalibration();
-  readFutaba();
+//  readFutaba();
+//  motorTargetSpeeds[0] = ch2;
+//  motorTargetSpeeds[1] = ch2;
+//  motorTargetSpeeds[2] = ch2;
+//  motorTargetSpeeds[3] = ch2;
 //  readSpeed(0);
-//  move();
+//  readSpeed(1);
+//  readSpeed(2);
+//  readSpeed(3);
+//  setSpeed(0, ch2);
+//  setSpeed(1, ch2);
+//  setSpeed(2, ch2);
+//  setSpeed(3, ch2);
+//    MoveMotor1(ch2);
+//    MoveMotor2(ch2);
+//    MoveMotor3(ch2);
+//    MoveMotor4(ch2);
+//    Serial.println(motorSpeeds[0]);
+//    Serial.println(String(ch2) + "," + String(motorSpeeds[0]));
+//  Serial.println(String(motorSpeeds[0]) + "," + String(motorSpeeds[1]) + "," + String(motorSpeeds[2]) + "," + String(motorSpeeds[3]));
+  
+  move();
 //  MoveMotor1(ch3);
 //  Serial.println(pulseIn(Motor1_pos, HIGH));
-  setSpeed(0, ch3);
-  s.reading(motorSpeeds[0]);
-  t.reading(motorTargetSpeeds[0]);
-  p.reading(motorInputs[0]);
-  Serial.println(String(t.getAvg()) + ", " + String(s.getAvg()) + ", " + String(p.getAvg()));
+//  setSpeed(0, ch3);
+//  s.reading(motorSpeeds[0]);
+//  t.reading(motorTargetSpeeds[0]);
+//  p.reading(motorInputs[0]);
+//  Serial.println(String(t.getAvg()) + ", " + String(s.getAvg()) + ", " + String(p.getAvg()));
 //  Serial.println(String(motorTargetSpeeds[0]) + ", " + String(motorSpeeds[0]) + ", " + String(motorInputs[0]));
-
+//MoveMotor1(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
+//MoveMotor2(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
+//MoveMotor3(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
+//MoveMotor4(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
 }
