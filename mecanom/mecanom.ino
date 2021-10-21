@@ -1,5 +1,6 @@
 
 #include <movingAvg.h>
+#include <PID_v1.h>
 
 const int Motor1_IN1=6;
 const int Motor1_IN2=5;
@@ -17,29 +18,18 @@ const int Motor4_IN3=9;
 const int Motor4_IN4=10;
 const int Motor4_Enable=8;
 
-//=================÷
-//const int Motor1_IN1=9;
-//const int Motor1_IN2=10;
-//const int Motor1_Enable=8;
-//
-//const int Motor2_IN3=12;
-//const int Motor2_IN4=11;
-//const int Motor2_Enable=13;
-//
-//const int Motor3_IN1=3;
-//const int Motor3_IN2=4;
-//const int Motor3_Enable=2;
-//
-//const int Motor4_IN3=6;
-//const int Motor4_IN4=5;
-//const int Motor4_Enable=7;
-
-int motorSpeeds[4] = {0, 0, 0, 0};
+//movingAvg motorSpeeds[4] = {movingAvg(3), movingAvg(3), movingAvg(3), movingAvg(3)};
+double motorSpeeds[4] = {0.0, 0.0, 0.0, 0.0};
 int motorInputs[4] = {0, 0, 0, 0};
 int motorTargetSpeeds[4] = {0, 0, 0, 0};
 unsigned long motorPos[4] = {0, 0, 0, 0};
 int motorPosPins[4] = {32, 34, 36, 50};
 unsigned long motorLastReads[4] = {0, 0, 0, 0};
+
+movingAvg m1Avg(3);
+movingAvg m2Avg(3);
+movingAvg m3Avg(3);
+movingAvg m4Avg(3);
 
 int ch1 = 0;
 int ch2 = 0;
@@ -69,6 +59,8 @@ const int max_limit = 250;
 const int min_limit = -250;
 int direction = 1;
 
+double differential = 0.0;
+int difference = 0;
 
 // ch1: left horizontal stick
 // ch2: left vertical stick
@@ -81,11 +73,6 @@ const int ch3_pin = 26;
 const int ch4_pin = 24;
 const int ch5_pin = 22;
 
-unsigned long time_keeper = 0;
-
-movingAvg s(20);
-movingAvg t(20);
-movingAvg p(20);
 
 void setup() {
 
@@ -116,10 +103,18 @@ void setup() {
   Serial.begin(57600); // Pour a bowl of Serial
   delay(3000);
 //  calibrate();
-  s.begin();
-  t.begin();
-  p.begin();
-
+//  motorSpeeds[0] = (3);
+//  motorSpeeds[1] = (3);
+//  motorSpeeds[2] = (3);
+//  motorSpeeds[3] = (3);
+//  motorSpeeds[0].begin();
+//  motorSpeeds[1].begin();
+//  motorSpeeds[2].begin();
+//  motorSpeeds[3].begin();
+  m1Avg.begin();
+  m2Avg.begin();
+  m3Avg.begin();
+  m4Avg.begin();
 }
 
 void checkCalibration() {
@@ -174,6 +169,9 @@ void readFutaba() {
   } else {
     ch3 = ch3 + dead_center;
   }
+  // used for differential here
+  differential = map((float)ch3, (float)max_limit, (float)min_limit, 0.0, 100.0) / 200.0;
+  //
   ch4 = map(pulseIn(ch4_pin, HIGH), ch4_min, ch4_max, min_limit, max_limit);
   if (ch4 <= dead_center && ch4 >= (dead_center * -1)) {
     ch4 = 0;
@@ -204,10 +202,11 @@ void readFutaba() {
 // back right
 void MoveMotor1(int speed) {
   speed = max(min(speed, 255), -255);
-  if (speed == 0) {
-     digitalWrite(Motor1_IN1, LOW);
-     digitalWrite(Motor1_IN2, LOW);
-  } else if (speed > 1) {
+
+//  if (speed == 0) {
+//     digitalWrite(Motor1_IN1, LOW);
+//     digitalWrite(Motor1_IN2, LOW);
+  if (speed >= 0) {
      digitalWrite(Motor1_IN1,HIGH);
      digitalWrite(Motor1_IN2,LOW);
      analogWrite(Motor1_Enable,speed);
@@ -221,27 +220,29 @@ void MoveMotor1(int speed) {
 // back left
 void MoveMotor2(int speed) {
   speed = max(min(speed, 255), -255);
-  if (speed == 0) {
-     digitalWrite(Motor2_IN3, LOW);
-     digitalWrite(Motor2_IN4, LOW);
-  } else if (speed > 1) {
+
+//  if (speed == 0) {
+//     digitalWrite(Motor2_IN3, LOW);
+//     digitalWrite(Motor2_IN4, LOW);
+  if (speed >= 0) {
+     analogWrite(Motor2_Enable,speed);
      digitalWrite(Motor2_IN3,HIGH);
      digitalWrite(Motor2_IN4,LOW);
-     analogWrite(Motor2_Enable,speed);
   } else {
+     analogWrite(Motor2_Enable,speed * -1);  
      digitalWrite(Motor2_IN3,LOW);
      digitalWrite(Motor2_IN4,HIGH);
-     analogWrite(Motor2_Enable,speed * -1);  
   }
 }
 
 // front left
 void MoveMotor3(int speed) {
   speed = max(min(speed, 255), -255);
-  if (speed == 0) {
-     digitalWrite(Motor3_IN1, LOW);
-     digitalWrite(Motor3_IN2, LOW);
-  } else if (speed > 1) {
+
+//  if (speed == 0) {
+//     digitalWrite(Motor3_IN1, LOW);
+//     digitalWrite(Motor3_IN2, LOW);
+  if (speed >= 0) {
      digitalWrite(Motor3_IN1,HIGH);
      digitalWrite(Motor3_IN2,LOW);
      analogWrite(Motor3_Enable,speed);
@@ -255,10 +256,12 @@ void MoveMotor3(int speed) {
 // front right
 void MoveMotor4(int speed) {
   speed = max(min(speed, 255), -255);
-  if (speed == 0) {
-     digitalWrite(Motor4_IN3, LOW);
-     digitalWrite(Motor4_IN4, LOW);
-  } else if (speed > 1) {
+
+//  if (speed == 0) {
+//     digitalWrite(Motor4_IN3, LOW);
+//     digitalWrite(Motor4_IN4, LOW);
+//  } else 
+  if (speed >= 0) {
      digitalWrite(Motor4_IN3,HIGH);
      digitalWrite(Motor4_IN4,LOW);
      analogWrite(Motor4_Enable,speed);
@@ -289,17 +292,17 @@ void move() {
     }
     if (ch1 != 0) {
       // forward + some side movements
-      m1 = m1 + (ch1 * -1);
-      m2 = m2 + ch1;
-      m3 = m3 + (ch1 * -1);
-      m4 = m4 + ch1;
+      m1 = m1 + ch1;
+      m2 = m2 + (ch1 * -1);
+      m3 = m3 + ch1;
+      m4 = m4 + (ch1 * -1);
     };
     if (ch4 != 0) {
       // forward + some rotational movement
-      m1 = m1 + (ch4 * 0.5 * direction);
-      m2 = m2 + (ch4 * -0.5 * direction);
-      m3 = m3 + (ch4 * -0.5 * direction);
-      m4 = m4 + (ch4 * 0.5 * direction);
+      m1 = m1 + (ch4 * -0.5 * direction);
+      m2 = m2 + (ch4 * 0.5 * direction);
+      m3 = m3 + (ch4 * 0.5 * direction);
+      m4 = m4 + (ch4 * -0.5 * direction);
     };
     if (direction == 1) {
       m1 = min(m1, -1);  
@@ -316,10 +319,6 @@ void move() {
     setSpeed(1, m2);
     setSpeed(2, m3);
     setSpeed(3, m4);
-//    MoveMotor1(m1);
-//    MoveMotor2(m2);
-//    MoveMotor3(m3);
-//    MoveMotor4(m4);
 //    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
 
   } else if (ch4 != 0) {
@@ -330,52 +329,38 @@ void move() {
     // right horizontal stick
     if (ch1 != 0) {
       // rotational + side movement
-      m1 = m1 + (ch1 * -1);
-      m2 = m2 + ch1;
-      m3 = m3 + (ch1 * -1);
-      m4 = m4 + ch1;
+      m1 = m1 + ch1;
+      m2 = m2 + (ch1 * -1);
+      m3 = m3 + ch1;
+      m4 = m4 + (ch1 * -1);
     }
     setSpeed(0, m1);
     setSpeed(1, m2);
     setSpeed(2, m3);
     setSpeed(3, m4);
-//    MoveMotor1(m1);
-//    MoveMotor2(m2);
-//    MoveMotor3(m3);
-//    MoveMotor4(m4);
 //    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
   } else if (ch1 != 0) {
-    int m1 = ch1 * -1;
-    int m2 = ch1;
-    int m3 = ch1 * -1;
-    int m4 = ch1;
+    int m1 = ch1;
+    int m2 = ch1 * -1;
+    int m3 = ch1;
+    int m4 = ch1 * -1;
     // pure side movement
     setSpeed(0, m1);
     setSpeed(1, m2);
     setSpeed(2, m3);
     setSpeed(3, m4);
-//    MoveMotor1(m1); 
-//    MoveMotor2(m2); 
-//    MoveMotor3(m3); 
-//    MoveMotor4(m4); 
 //    Serial.println(String(m1) +", "+ String(m2) +", "+ String(m3) +", "+ String(m4) +", "+ String(direction));
   } else {
     setSpeed(0, 0);
     setSpeed(1, 0);
     setSpeed(2, 0);
     setSpeed(3, 0);
-//    MoveMotor1(0);
-//    MoveMotor2(0);
-//    MoveMotor3(0);
-//    MoveMotor4(0);
   }
 
 }
-void readSpeed(int motor) {
-//    Serial.println(pulseIn(motorPosPins[motor], HIGH));
+double readSpeed(int motor) {
     unsigned long new_pos = min(max(map(pulseIn(motorPosPins[motor], HIGH), 0, 900, 0, 3600), 0), 3600);
     unsigned long new_read = millis();
-//        Serial.println(String(new_pos) + "," + String(motorPos[motor]));
     int delta = 0;
     int target = motorTargetSpeeds[motor];
     if (motor == 0 || motor == 3) {
@@ -407,36 +392,57 @@ void readSpeed(int motor) {
         }
       }
     }
-    
     if (delta != 0 && delta < 2000 && delta > -2000) {
-//      Serial.println(delta);
       int speed = map((abs(delta) * 10) / (new_read - motorLastReads[motor]), -140, 140, -255, 255);
-//      int speed = (abs(delta) * 10) / (new_read - motorLastReads[motor]);
       if (delta < 0) {
         speed = speed * -1;  
       }
+      speed = min(max(speed, -255), 255);
+      if (motor == 0) {
+        m1Avg.reading(speed);
+        speed = m1Avg.getAvg();
+      } else if (motor == 1) {
+        m2Avg.reading(speed);
+        speed = m2Avg.getAvg();
+      } else if (motor == 2) {
+        m3Avg.reading(speed);
+        speed = m3Avg.getAvg();
+      } else if (motor == 3) {
+        m4Avg.reading(speed);
+        speed = m4Avg.getAvg();
+      };
       motorSpeeds[motor] = speed;
     }
     motorPos[motor] = new_pos;
     motorLastReads[motor] = new_read;
+//    Serial.println(String(motorSpeeds[motor]) + ";" + String(target));
+    return motorSpeeds[motor];
 }
 
 void setSpeed(int motor, int speed) {
   readSpeed(motor);
   motorTargetSpeeds[motor] = speed;
+  if (speed > 0 && motorInputs[motor] < 0) {
+    speed = 0;
+  } else if (speed < 0 && motorInputs[motor] > 0) {
+    speed = 0;
+  }
   if (speed == 0) {
     motorInputs[motor] = 0;
     motorSpeeds[motor] = 0;
-  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] > 25) {
-    motorInputs[motor] = motorInputs[motor] - 5;
-  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] < -25) {
-    motorInputs[motor] = motorInputs[motor] + 5;  
-  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] > 5) {
-    motorInputs[motor] = motorInputs[motor] - 3;
-  } else if (motorSpeeds[motor] - motorTargetSpeeds[motor] < -5) {
-    motorInputs[motor] = motorInputs[motor] + 3;  
+
+  } else if (abs(motorTargetSpeeds[motor] - motorSpeeds[motor]) > 2) {
+    difference = motorTargetSpeeds[motor] - motorSpeeds[motor];
+    difference = round(float(difference) * differential);
+    if (motorTargetSpeeds[motor] > 0 && difference < 2 && difference > 0) {
+      difference = 2;
+    } else if (motorTargetSpeeds[motor] < 0 && difference > -2 && difference < 0) {
+      difference = -2;
+    }
+    motorInputs[motor] = motorInputs[motor] + difference;
   }
   motorInputs[motor] = min(max(motorInputs[motor], -255), 255);
+
   if (motor == 0) {
     MoveMotor1(motorInputs[motor]);
   } else if (motor == 1) {
@@ -449,39 +455,7 @@ void setSpeed(int motor, int speed) {
 }
 
 void loop() {
-//  checkCalibration();
-//  readFutaba();
-//  motorTargetSpeeds[0] = ch2;
-//  motorTargetSpeeds[1] = ch2;
-//  motorTargetSpeeds[2] = ch2;
-//  motorTargetSpeeds[3] = ch2;
-//  readSpeed(0);
-//  readSpeed(1);
-//  readSpeed(2);
-//  readSpeed(3);
-//  setSpeed(0, ch2);
-//  setSpeed(1, ch2);
-//  setSpeed(2, ch2);
-//  setSpeed(3, ch2);
-//    MoveMotor1(ch2);
-//    MoveMotor2(ch2);
-//    MoveMotor3(ch2);
-//    MoveMotor4(ch2);
-//    Serial.println(motorSpeeds[0]);
-//    Serial.println(String(ch2) + "," + String(motorSpeeds[0]));
-//  Serial.println(String(motorSpeeds[0]) + "," + String(motorSpeeds[1]) + "," + String(motorSpeeds[2]) + "," + String(motorSpeeds[3]));
-  
   move();
-//  MoveMotor1(ch3);
-//  Serial.println(pulseIn(Motor1_pos, HIGH));
-//  setSpeed(0, ch3);
-//  s.reading(motorSpeeds[0]);
-//  t.reading(motorTargetSpeeds[0]);
-//  p.reading(motorInputs[0]);
-//  Serial.println(String(t.getAvg()) + ", " + String(s.getAvg()) + ", " + String(p.getAvg()));
-//  Serial.println(String(motorTargetSpeeds[0]) + ", " + String(motorSpeeds[0]) + ", " + String(motorInputs[0]));
-//MoveMotor1(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
-//MoveMotor2(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
-//MoveMotor3(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
-//MoveMotor4(map(pulseIn(ch3_pin, HIGH), 900, 2100, -120, 120));
+  int motor = 1;
+  Serial.println(String(motorSpeeds[motor]) + "," + String(motorInputs[motor]) + "," + String(motorTargetSpeeds[motor]) + "," + String(differential));
 }
