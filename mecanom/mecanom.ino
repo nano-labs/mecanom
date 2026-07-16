@@ -1,5 +1,4 @@
 #include <movingAvg.h>
-#include <PID_v1.h>
 
 // =====================================================================
 //  MECANUM DRIVE — 4 motors, 4 angular position sensors, Futaba RC in
@@ -23,6 +22,11 @@
 //      bench. This replaces the old hardcoded `motor = 0;` override
 //      in readSpeed(), which has been removed — DEBUG_MOTOR is now
 //      the single place that selects which motor is under test.
+//    - move()'s old ad-hoc ch1/ch2/ch4 mixing branches are replaced by
+//      mecanumDrive(x, y, yaw, reservePercent), a verified port of the
+//      Python/JS mecanum_drive() developed and tested in the companion
+//      simulator. ch5 now selects the reserve percentage (BOOST/SAFE)
+//      instead of its old job of halving the raw stick inputs.
 // =====================================================================
 
 
@@ -32,11 +36,6 @@ const int motorPinA[4]    = {6, 3, 12, 9};   // IN1 (0,2) / IN3 (1,3)
 const int motorPinB[4]    = {5, 4, 11, 10};  // IN2 (0,2) / IN4 (1,3)
 const int motorEnable[4]  = {7, 2, 13, 8};
 const int motorPosPins[4] = {32, 34, 36, 50}; // angular position sensors
-
-// Left-side motors (1,2) are mounted mirrored relative to right-side
-// motors (0,3), so a physically-forward rotation reads as an increasing
-// raw angle on one side and a decreasing raw angle on the other.
-const int motorDirSign[4] = {1, -1, -1, 1};
 
 // ------------------------- RC receiver pins -------------------------
 // ch1: left horizontal stick
@@ -61,10 +60,15 @@ int ch5_min = 987,  ch5_max = 1960;
 const int dead_center = 50;
 const int max_limit = 250;
 const int min_limit = -250;
-const unsigned long PULSE_TIMEOUT = 50000UL; // 25ms; prevents pulseIn() stalling up to 1s on signal loss
+const unsigned long PULSE_TIMEOUT = 50000UL; // 50ms; prevents pulseIn() stalling up to 1s on signal loss
 
-bool calibrating = false;
-unsigned long calibration_start = 0;
+// Worst case for the mecanum mixer below: |x|+|y|+|yaw| = 300 when all three
+// axes are simultaneously maxed, requiring a coefficient of 3. Reserving this
+// much guarantees zero clipping/distortion for any combined command, at the
+// cost of capping single-axis full-throttle to 1/3 of max wheel speed.
+// Selected by ch5 (2-position switch): SAFE position reserves this amount,
+// BOOST position reserves nothing.
+const double RESERVE_SAFE_PERCENT = 200.0 / 3.0; // ~66.67%
 
 // ------------------------- Single-motor debug mode -------------------------
 // When true, only DEBUG_MOTOR is driven and its sensor is read; the other
@@ -90,7 +94,6 @@ movingAvg m4Avg(3);
 int ch1 = 0, ch2 = 0, ch3 = 0, ch4 = 0, ch5 = 0;
 
 // ------------------------- Drive/ramp state -------------------------
-int direction = 1;
 double differential = 0.0;
 int difference = 0;
 
@@ -182,13 +185,6 @@ void readFutaba() {
   ch4 = readChannel(ch4_pin, ch4_min, ch4_max, min_limit, max_limit, true);
   ch5 = readChannel(ch5_pin, ch5_min, ch5_max, min_limit, max_limit, false); // switch, no deadband
 
-  if (ch5 > 0) {
-    ch1 = ch1 * 0.5;
-    ch2 = ch2 * 0.5;
-    ch3 = ch3 * 0.5;
-    ch4 = ch4 * 0.5;
-  }
-
   // Serial.println(String(ch1) +", "+ String(ch2) +", "+ String(ch3) +", "+ String(ch4) +", "+ String(ch5));
 }
 
@@ -271,9 +267,11 @@ double readSpeed(int motor) {
 
   // True wraparound delta — no dependency on the commanded target, so this
   // reflects what the wheel is actually doing even while stopping, stalled,
-  // or being pushed opposite to the commanded direction.
+  // or being pushed opposite to the commanded direction. Assumes motor
+  // wiring/polarity is set up so that a positive command moves every motor
+  // "forward" (i.e. increases raw position) — adjust wiring, not software,
+  // if a motor reads backwards.
   int delta = circularDelta((long)motorPos[motor], (long)new_pos, 3600);
-  delta *= motorDirSign[motor];
 
   int speed;
   if (abs(delta) <= POSITION_NOISE_DEADBAND) {
@@ -345,6 +343,49 @@ void setSpeed(int motor, int speed) {
   moveMotor(motor, motorInputs[motor]);
 }
 
+// Wheel speeds returned by mecanumDrive(), in the same [min_limit,max_limit]
+// domain as the RC channels — ready to pass straight into setSpeed().
+struct WheelSpeeds {
+  double frontLeft;
+  double frontRight;
+  double rearLeft;
+  double rearRight;
+};
+
+// Direct port of the verified Python mecanum_drive(x, y, yaw, reserve_percent),
+// adapted to operate directly in the RC channels' native [min_limit,max_limit]
+// range instead of [-100,100], so callers can pass ch1/ch2/ch4 straight through
+// with no rescaling. reservePercent is still a plain 0-100 percentage of that
+// range. reservePercent=0 reproduces the un-reserved behavior exactly.
+WheelSpeeds mecanumDrive(double x, double y, double yaw, double reservePercent) {
+  double scale = (100.0 - reservePercent) / 100.0;
+  x *= scale;
+  y *= scale;
+  yaw *= scale;
+
+  double frontRight = x + y + yaw;
+  double frontLeft  = x - y - yaw;
+  double backRight  = x - y + yaw;
+  double backLeft   = x + y - yaw;
+
+  double proportionalCoefficient =
+      max(max(abs(frontRight), abs(frontLeft)), max(abs(backRight), abs(backLeft))) / (double)max_limit;
+
+  if (proportionalCoefficient > 1.0) {
+    frontRight /= proportionalCoefficient;
+    frontLeft  /= proportionalCoefficient;
+    backRight  /= proportionalCoefficient;
+    backLeft   /= proportionalCoefficient;
+  }
+
+  WheelSpeeds w;
+  w.frontLeft  = frontLeft;
+  w.frontRight = frontRight;
+  w.rearLeft   = backLeft;
+  w.rearRight  = backRight;
+  return w;
+}
+
 // Drives only DEBUG_MOTOR, straight from the left vertical stick (ch2) —
 // the same axis that drives "forward" in normal mixing, so stick feel
 // while bench-testing is representative of real driving. No other motor's
@@ -355,98 +396,29 @@ void debugSingleMotor() {
 
 void move() {
   readFutaba();
-  // ch1: left horizontal stick
-  // ch2: left vertical stick
-  // ch3: right vertical stick
-  // ch4: right horizontal stick
-  // ch5: 2-position switch
+  // ch1: left horizontal stick   -> y   (assumed positive = right strafe;
+  //                                       flip sign below if this reads
+  //                                       backwards on the bench)
+  // ch2: left vertical stick     -> x   (forward; already sign-corrected
+  //                                       in readFutaba's inverted mapping)
+  // ch3: right vertical stick    -> ramp/differential dial, unrelated to mixing
+  // ch4: right horizontal stick  -> yaw (assumed positive = clockwise;
+  //                                       flip sign below if reversed)
+  // ch5: 2-position switch       -> reserve select (BOOST / SAFE)
 
   if (SINGLE_MOTOR_DEBUG) {
     debugSingleMotor();
     return;
   }
 
-  if (ch2 != 0) {
-    // left vertical stick
-    int m1 = ch2;
-    int m2 = ch2;
-    int m3 = ch2;
-    int m4 = ch2;
+  double reservePercent = (ch5 > 0) ? RESERVE_SAFE_PERCENT : 0.0;
 
-    if (ch2 > 0) {
-      direction = -1;
-    } else {
-      direction = 1;
-    }
+  // ch1/ch2/ch4 are already in mecanumDrive()'s native [min_limit,max_limit]
+  // domain, so they're passed straight through with no rescaling.
+  WheelSpeeds w = mecanumDrive(ch2, ch1, ch4, reservePercent);
 
-    if (ch1 != 0) {
-      // forward + some side movement
-      m1 = m1 + ch1;
-      m2 = m2 + (ch1 * -1);
-      m3 = m3 + ch1;
-      m4 = m4 + (ch1 * -1);
-    }
-
-    if (ch4 != 0) {
-      // forward + some rotational movement
-      m1 = m1 + (ch4 * -0.5 * direction);
-      m2 = m2 + (ch4 * 0.5 * direction);
-      m3 = m3 + (ch4 * 0.5 * direction);
-      m4 = m4 + (ch4 * -0.5 * direction);
-    }
-
-    if (direction == 1) {
-      m1 = min(m1, -1);
-      m2 = min(m2, -1);
-      m3 = min(m3, -1);
-      m4 = min(m4, -1);
-    } else {
-      m1 = max(m1, 1);
-      m2 = max(m2, 1);
-      m3 = max(m3, 1);
-      m4 = max(m4, 1);
-    }
-
-    setSpeed(0, m1);
-    setSpeed(1, m2);
-    setSpeed(2, m3);
-    setSpeed(3, m4);
-
-  } else if (ch4 != 0) {
-    // right horizontal stick — rotation, plus optional side movement
-    int m1 = ch4 * 0.5;
-    int m2 = ch4 * -0.5;
-    int m3 = ch4 * -0.5;
-    int m4 = ch4 * 0.5;
-
-    if (ch1 != 0) {
-      m1 = m1 + ch1;
-      m2 = m2 + (ch1 * -1);
-      m3 = m3 + ch1;
-      m4 = m4 + (ch1 * -1);
-    }
-
-    setSpeed(0, m1);
-    setSpeed(1, m2);
-    setSpeed(2, m3);
-    setSpeed(3, m4);
-
-  } else if (ch1 != 0) {
-    // pure side (strafe) movement
-    int m1 = ch1;
-    int m2 = ch1 * -1;
-    int m3 = ch1;
-    int m4 = ch1 * -1;
-
-    setSpeed(0, m1);
-    setSpeed(1, m2);
-    setSpeed(2, m3);
-    setSpeed(3, m4);
-
-  } else {
-    setSpeed(0, 0);
-    setSpeed(1, 0);
-    setSpeed(2, 0);
-    setSpeed(3, 0);
-  }
+  setSpeed(0, (int)w.rearRight);  // back right
+  setSpeed(1, (int)w.rearLeft);   // back left
+  setSpeed(2, (int)w.frontLeft);  // front left
+  setSpeed(3, (int)w.frontRight); // front right
 }

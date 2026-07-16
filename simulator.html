@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mecanum Kinematics — Forward Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0a0d10;
+    --panel: #12171c;
+    --panel-2: #161c22;
+    --line: #232b32;
+    --amber: #ffb020;
+    --rose: #e0574f;
+    --cyan: #5fd4ff;
+    --text: #e9edf0;
+    --muted: #7c8891;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+    --disp: 'Space Grotesk', var(--sans);
+  }
+
+  *{ box-sizing: border-box; }
+
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+  }
+
+  body{
+    min-height: 100vh;
+    padding: 28px 20px 60px;
+  }
+
+  .wrap{
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  header{
+    display:flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px 22px;
+    margin-bottom: 22px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .eyebrow{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+
+  h1{
+    font-family: var(--disp);
+    font-weight: 600;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  header p{
+    flex-basis: 100%;
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 13.5px;
+    max-width: 66ch;
+  }
+
+  header p kbd{
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--text);
+  }
+
+  .layout{
+    display:grid;
+    grid-template-columns: 340px 1fr;
+    gap: 18px;
+  }
+
+  @media (max-width: 880px){
+    .layout{ grid-template-columns: 1fr; }
+  }
+
+  .panel{
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .panel + .panel{ margin-top: 16px; }
+
+  .panel h2{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+
+  .cell-box{
+    background: #0e1216;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 10px 8px;
+    display:flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cell-box .label{
+    display:flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .cell-box .label b{ color: var(--text); font-weight: 600; }
+  .cell-box .label .keys{ color: var(--cyan); }
+
+  .cell-box .val{
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+  }
+  .cell-box .val.pos{ color: var(--amber); }
+  .cell-box .val.neg{ color: var(--rose); }
+  .cell-box .val.zero{ color: var(--muted); }
+
+  .xyz-stack{ display:flex; flex-direction: column; gap: 10px; }
+
+  input[type="range"]{
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--cyan);
+    border: 2px solid #05161c;
+    cursor: pointer;
+    margin-top: -5px;
+  }
+  input[type="range"]::-moz-range-thumb{
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--cyan);
+    border: 2px solid #05161c;
+    cursor: pointer;
+  }
+  input[type="range"]:focus-visible::-webkit-slider-thumb{
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+  }
+
+  .hint{
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.7;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .hint .keys{ color: var(--cyan); }
+
+  .ch5-switch{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .ch5-switch .track{
+    position:relative;
+    width: 88px;
+    height: 30px;
+    background: #0e1216;
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    cursor: pointer;
+  }
+  .ch5-switch .thumb{
+    position:absolute;
+    top: 3px;
+    left: 3px;
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: var(--muted);
+    transition: left 150ms ease, background 150ms ease;
+  }
+  .ch5-switch .track.boost .thumb{
+    left: 3px;
+    background: var(--rose);
+  }
+  .ch5-switch .track.safe .thumb{
+    left: 45px;
+    background: var(--cyan);
+  }
+  .ch5-switch .state-label{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-align: right;
+  }
+  .ch5-switch .state-label b{ display:block; font-size: 13px; }
+  .ch5-switch .state-label.boost b{ color: var(--rose); }
+  .ch5-switch .state-label.safe b{ color: var(--cyan); }
+
+  .transport{
+    display:flex;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .transport button{ flex:1; }
+
+  button{
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 11px;
+    cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+  button:hover{ border-color: var(--cyan); color: var(--cyan); }
+  button:focus-visible{ outline: 2px solid var(--amber); outline-offset: 2px; }
+  button.primary{ border-color: var(--amber); color: var(--amber); }
+  button.primary:hover{ background: var(--amber); color: #1a1204; }
+  button.danger:hover{ border-color: var(--rose); color: var(--rose); }
+
+  .chassis-readout{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 10px;
+    position: relative;
+    padding: 14px;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+  }
+
+  .front-tag{
+    text-align:center;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    grid-column: 1 / -1;
+    margin: -4px 0 -2px;
+  }
+  .front-tag.bottom{ order: 99; margin: -2px 0 -4px; }
+
+  .wheel-readout .val{ font-size: 20px; }
+
+  details{ margin-top: 12px; }
+  summary{
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 6px 0;
+  }
+  summary:hover{ color: var(--cyan); }
+
+  .geo-row{
+    display:flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: 8px 0;
+  }
+  .geo-row input[type="number"]{
+    width: 70px;
+    background: #0e1216;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 4px 6px;
+  }
+
+  .formula{
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.9;
+    color: var(--text);
+    background: #0e1216;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-top: 8px;
+    overflow-x: auto;
+  }
+  .formula .c{ color: var(--muted); }
+  .formula .a{ color: var(--amber); }
+  .formula .cy{ color: var(--cyan); }
+
+  .stage-panel{
+    padding: 0;
+    overflow: hidden;
+    position: relative;
+    min-height: 460px;
+    display:flex;
+  }
+
+  canvas{ width: 100%; height: 100%; display:block; }
+
+  .scale-legend{
+    position:absolute;
+    left: 16px;
+    bottom: 14px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    display:flex;
+    align-items:center;
+    gap: 6px;
+    pointer-events:none;
+  }
+  .scale-legend .bar{
+    width: 60px;
+    height: 0;
+    border-top: 1px solid var(--muted);
+    position: relative;
+  }
+  .scale-legend .bar::before, .scale-legend .bar::after{
+    content:"";
+    position:absolute; top:-3px;
+    width:0; height:6px;
+    border-left: 1px solid var(--muted);
+  }
+  .scale-legend .bar::before{ left:0; }
+  .scale-legend .bar::after{ right:0; }
+
+  .stage-tag{
+    position:absolute;
+    top: 14px;
+    left: 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    pointer-events:none;
+  }
+  .stage-tag b{ color: var(--amber); }
+
+  @media (prefers-reduced-motion: reduce){
+    button{ transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">Forward Kinematics</span>
+    <h1>Mecanum Drive Simulator</h1>
+    <p>Drive with <kbd>X</kbd>/<kbd>Y</kbd>/<kbd>yaw</kbd> — via the sliders, or the keyboard: <kbd>W</kbd>/<kbd>S</kbd> for x, <kbd>A</kbd>/<kbd>D</kbd> for y, <kbd>&lt;</kbd>/<kbd>&gt;</kbd> for yaw. The drive-mixing function turns these into four wheel speeds, which are fed into forward kinematics to move the chassis.</p>
+  </header>
+
+  <div class="layout">
+    <div class="col-left">
+
+      <div class="panel">
+        <h2>Drive Input</h2>
+        <div class="xyz-stack">
+          <div class="cell-box">
+            <div class="label"><b>x</b><span>forward <span class="keys">W / S</span></span></div>
+            <input type="range" id="s-x" min="-100" max="100" step="1" value="0">
+            <div class="val zero" id="v-x">0</div>
+          </div>
+          <div class="cell-box">
+            <div class="label"><b>y</b><span>right <span class="keys">D / A</span></span></div>
+            <input type="range" id="s-y" min="-100" max="100" step="1" value="0">
+            <div class="val zero" id="v-y">0</div>
+          </div>
+          <div class="cell-box">
+            <div class="label"><b>yaw</b><span>clockwise <span class="keys">&gt; / &lt;</span></span></div>
+            <input type="range" id="s-yaw" min="-100" max="100" step="1" value="0">
+            <div class="val zero" id="v-yaw">0</div>
+          </div>
+          <div class="cell-box">
+            <div class="label"><b>ch5</b><span>reserve switch</span></div>
+            <div class="ch5-switch">
+              <div class="track boost" id="ch5-track"><div class="thumb"></div></div>
+              <div class="state-label boost" id="ch5-label">BOOST<b>0% reserve</b></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="transport">
+          <button class="primary" id="btn-play">Pause</button>
+          <button id="btn-reset">Reset</button>
+        </div>
+
+        <div class="hint">Hold a key to command 100% on that axis, release to return to 0%. Opposing keys held together cancel out.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Wheel Speeds</h2>
+        <div class="chassis-readout">
+          <div class="front-tag">▲ front</div>
+
+          <div class="cell-box wheel-readout">
+            <div class="label"><b>FL</b><span>front-left</span></div>
+            <div class="val zero" id="w-FL">0</div>
+          </div>
+
+          <div class="cell-box wheel-readout">
+            <div class="label"><b>FR</b><span>front-right</span></div>
+            <div class="val zero" id="w-FR">0</div>
+          </div>
+
+          <div class="cell-box wheel-readout">
+            <div class="label"><b>RL</b><span>rear-left</span></div>
+            <div class="val zero" id="w-RL">0</div>
+          </div>
+
+          <div class="cell-box wheel-readout">
+            <div class="label"><b>RR</b><span>rear-right</span></div>
+            <div class="val zero" id="w-RR">0</div>
+          </div>
+
+          <div class="front-tag bottom">rear</div>
+        </div>
+
+        <details>
+          <summary>Kinematics used</summary>
+          <div class="formula"><span class="c">// worst case: |x|+|y|+|yaw| = 300 when all three are maxed => k = 3</span><br>
+<span class="c">// zero-clipping reserve = (1 − 100/300)·100 = 66.7%, gated by ch5</span><br>
+s&nbsp;&nbsp;&nbsp;= (100 − reserve) / 100&nbsp;&nbsp;<span class="c">reserve = ch5 &gt; 0 ? 66.7 : 0</span><br>
+x,y,yaw ×= s<br><br>
+FR = x + y + yaw&nbsp;&nbsp;&nbsp;FL = x − y − yaw<br>
+RR = x − y + yaw&nbsp;&nbsp;&nbsp;RL = x + y − yaw<br>
+k&nbsp;&nbsp;= max(|FR|,|FL|,|RR|,|RL|) / 100<br>
+<span class="c">if k &gt; 1:</span> wheel /= k&nbsp;&nbsp;<span class="c">// else pass through unscaled</span><br><br>
+<span class="c">// forward kinematics: wheel input mapped [-255,255] to angular rate [rad/s]</span><br>
+w = (input / 255) · maxRate<br><br>
+<span class="a">vx</span>&nbsp;&nbsp;&nbsp;= r/4 · ( FL + FR + RL + RR )<br>
+<span class="a">vy</span>&nbsp;&nbsp;&nbsp;= r/4 · (−FL + FR + RL − RR )<br>
+<span class="a">ω</span>&nbsp;&nbsp;&nbsp;&nbsp;= r / (4·(L+W)) · (−FL + FR − RL + RR )<br><br>
+<span class="c">// world-frame integration, θ clockwise-positive</span><br>
+<span class="cy">ẋ</span> = vx·sinθ + vy·cosθ<span class="c"> &nbsp;&nbsp;ẏ = −vx·cosθ + vy·sinθ&nbsp;&nbsp;θ̇ = ω</span></div>
+        </details>
+      </div>
+
+    </div>
+
+    <div class="panel stage-panel">
+      <div class="stage-tag">TOP-DOWN VIEW <b id="stage-status">● running</b></div>
+      <canvas id="stage"></canvas>
+      <div class="scale-legend"><span class="bar"></span><span id="scale-label">0.5 m</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const wheels = { FL:0, FR:0, RL:0, RR:0 };
+  const spinPhase = { FL:0, FR:0, RL:0, RR:0 };
+  // Fixed chassis geometry — matches the real robot.
+  const geo = { r:0.10, L:0.315, W:0.255, maxRate:13 };
+  const pose = { x:0, y:0, theta:0 };
+  let trail = [];
+  const MAX_TRAIL = 900;
+  let running = true;
+  let lastT = null;
+
+  const wheelValEls = {
+    FL: document.getElementById('w-FL'),
+    FR: document.getElementById('w-FR'),
+    RL: document.getElementById('w-RL'),
+    RR: document.getElementById('w-RR'),
+  };
+  const btnPlay = document.getElementById('btn-play');
+  const btnReset = document.getElementById('btn-reset');
+  const stageStatus = document.getElementById('stage-status');
+
+  function updateWheelDisplay(k){
+    const v = wheels[k];
+    wheelValEls[k].textContent = v.toFixed(0);
+    wheelValEls[k].className = 'val ' + (v > 2 ? 'pos' : v < -2 ? 'neg' : 'zero');
+  }
+
+  btnPlay.addEventListener('click', ()=>{
+    running = !running;
+    btnPlay.textContent = running ? 'Pause' : 'Resume';
+    stageStatus.textContent = running ? '● running' : '● paused';
+    stageStatus.style.color = running ? 'var(--amber)' : 'var(--muted)';
+    lastT = null;
+  });
+
+  btnReset.addEventListener('click', ()=>{
+    pose.x = 0; pose.y = 0; pose.theta = 0;
+    trail = [];
+  });
+
+  // Direct port of the user's Python mecanum_drive(x, y, yaw, reserve_percent).
+  // reserve_percent holds back a slice of wheel range from single-axis full
+  // throttle, freeing it as headroom for combined moves instead of letting
+  // the >1 proportional scale-down flatten every wheel's speed.
+  function mecanumDriveXYYaw(x, y, yaw, reservePercent){
+    const scale = (100 - reservePercent) / 100;
+    x = x * scale;
+    y = y * scale;
+    yaw = yaw * scale;
+
+    let frontRight = x + y + yaw;
+    let frontLeft  = x - y - yaw;
+    let backRight  = x - y + yaw;
+    let backLeft   = x + y - yaw;
+
+    const proportionalCoefficient = Math.max(Math.abs(frontRight), Math.abs(frontLeft), Math.abs(backRight), Math.abs(backLeft)) / 100;
+
+    if (proportionalCoefficient > 1){
+      frontRight /= proportionalCoefficient;
+      frontLeft  /= proportionalCoefficient;
+      backRight  /= proportionalCoefficient;
+      backLeft   /= proportionalCoefficient;
+    }
+
+    const toWheelScale = 255/100;
+
+    return {
+      FL: frontLeft  * toWheelScale,
+      FR: frontRight * toWheelScale,
+      RL: backLeft   * toWheelScale,
+      RR: backRight  * toWheelScale,
+    };
+  }
+
+  const xyzSliders = {
+    x: document.getElementById('s-x'),
+    y: document.getElementById('s-y'),
+    yaw: document.getElementById('s-yaw'),
+  };
+  const xyzValEls = {
+    x: document.getElementById('v-x'),
+    y: document.getElementById('v-y'),
+    yaw: document.getElementById('v-yaw'),
+  };
+  const xyzState = { x:0, y:0, yaw:0 };
+
+  // Worst case: all three axes maxed simultaneously => |x|+|y|+|yaw| = 300 => k=3.
+  // Fully absorbing that with zero clipping requires reserve = (1 - 100/300)*100.
+  const WORST_CASE_RESERVE_PERCENT = 200 / 3; // ~66.67%
+
+  const ch5Track = document.getElementById('ch5-track');
+  const ch5Label = document.getElementById('ch5-label');
+  let ch5Safe = false;
+  let reservePercent = 0;
+
+  function setCh5(safe){
+    ch5Safe = safe;
+    reservePercent = safe ? WORST_CASE_RESERVE_PERCENT : 0;
+    ch5Track.className = 'track ' + (safe ? 'safe' : 'boost');
+    ch5Label.className = 'state-label ' + (safe ? 'safe' : 'boost');
+    ch5Label.innerHTML = (safe ? 'SAFE' : 'BOOST') + '<b>' + reservePercent.toFixed(1) + '% reserve</b>';
+    applyXyz();
+  }
+
+  ch5Track.addEventListener('click', ()=> setCh5(!ch5Safe));
+
+  function updateXyzReadout(k){
+    const v = xyzState[k];
+    xyzValEls[k].textContent = v.toFixed(0);
+    xyzValEls[k].className = 'val ' + (v > 0 ? 'pos' : v < 0 ? 'neg' : 'zero');
+  }
+
+  function applyXyz(){
+    const out = mecanumDriveXYYaw(xyzState.x, xyzState.y, xyzState.yaw, reservePercent);
+    Object.keys(out).forEach(k=>{
+      wheels[k] = out[k];
+      updateWheelDisplay(k);
+    });
+  }
+
+  function setXyz(x, y, yaw){
+    xyzState.x = x; xyzState.y = y; xyzState.yaw = yaw;
+    xyzSliders.x.value = x; xyzSliders.y.value = y; xyzSliders.yaw.value = yaw;
+    updateXyzReadout('x'); updateXyzReadout('y'); updateXyzReadout('yaw');
+    applyXyz();
+  }
+
+  Object.keys(xyzSliders).forEach(k=>{
+    xyzSliders[k].addEventListener('input', ()=>{
+      xyzState[k] = parseFloat(xyzSliders[k].value);
+      updateXyzReadout(k);
+      applyXyz();
+    });
+  });
+
+  const keyState = { w:false, s:false, a:false, d:false, lt:false, gt:false };
+
+  function isTypingTarget(el){
+    if(!el) return false;
+    const tag = el.tagName;
+    if(tag === 'INPUT' && el.type === 'range') return false;
+    return tag === 'INPUT' || tag === 'TEXTAREA';
+  }
+
+  function recomputeFromKeys(){
+    const x = (keyState.w ? 100 : 0) + (keyState.s ? -100 : 0);
+    const y = (keyState.d ? 100 : 0) + (keyState.a ? -100 : 0);
+    const yaw = (keyState.gt ? 100 : 0) + (keyState.lt ? -100 : 0);
+    setXyz(x, y, yaw);
+  }
+
+  function handleKey(key, isDown){
+    let matched = true;
+    switch(key.toLowerCase()){
+      case 'w': keyState.w = isDown; break;
+      case 's': keyState.s = isDown; break;
+      case 'a': keyState.a = isDown; break;
+      case 'd': keyState.d = isDown; break;
+      case ',': case '<': keyState.lt = isDown; break;
+      case '.': case '>': keyState.gt = isDown; break;
+      default: matched = false;
+    }
+    if(matched) recomputeFromKeys();
+  }
+
+  window.addEventListener('keydown', (e)=>{
+    if(e.repeat) return;
+    if(isTypingTarget(document.activeElement)) return;
+    handleKey(e.key, true);
+  });
+  window.addEventListener('keyup', (e)=>{
+    if(isTypingTarget(document.activeElement)) return;
+    handleKey(e.key, false);
+  });
+
+  function computeVelocities(){
+    const toRad = v => (v/255) * geo.maxRate;
+    const FL = toRad(wheels.FL), FR = toRad(wheels.FR),
+          RL = toRad(wheels.RL), RR = toRad(wheels.RR);
+    const vx = geo.r/4 * (FL + FR + RL + RR);
+    const vy = geo.r/4 * (-FL + FR + RL - RR);
+    const omega = geo.r/(4*(geo.L+geo.W)) * (-FL + FR - RL + RR);
+    return { vx, vy, omega };
+  }
+
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  let PX_PER_M = 220;
+  let dpr = 1;
+
+  function resize(){
+    const rect = canvas.parentElement.getBoundingClientRect();
+    dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function drawGrid(cw, ch, camX, camY){
+    const spacing = 0.1 * PX_PER_M;
+    const offX = ((camX * PX_PER_M) % spacing + spacing) % spacing;
+    const offY = ((camY * PX_PER_M) % spacing + spacing) % spacing;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for(let x = -offX; x < cw; x += spacing){ ctx.moveTo(x, 0); ctx.lineTo(x, ch); }
+    for(let y = -offY; y < ch; y += spacing){ ctx.moveTo(0, y); ctx.lineTo(cw, y); }
+    ctx.stroke();
+
+    const bigSpacing = spacing * 5;
+    const bigOffX = ((camX * PX_PER_M) % bigSpacing + bigSpacing) % bigSpacing;
+    const bigOffY = ((camY * PX_PER_M) % bigSpacing + bigSpacing) % bigSpacing;
+    ctx.strokeStyle = 'rgba(255,255,255,0.09)';
+    ctx.beginPath();
+    for(let x = -bigOffX; x < cw; x += bigSpacing){ ctx.moveTo(x, 0); ctx.lineTo(x, ch); }
+    for(let y = -bigOffY; y < ch; y += bigSpacing){ ctx.moveTo(0, y); ctx.lineTo(cw, y); }
+    ctx.stroke();
+  }
+
+  function drawTrail(cw, ch, camX, camY){
+    if(trail.length < 2) return;
+    ctx.beginPath();
+    for(let i=0;i<trail.length;i++){
+      const p = trail[i];
+      const px = cw/2 + (p.x - camX) * PX_PER_M;
+      const py = ch/2 + (p.y - camY) * PX_PER_M;
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.strokeStyle = 'rgba(95,212,255,0.55)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function roundRect(c, x, y, w, h, r){
+    c.beginPath();
+    c.moveTo(x+r, y);
+    c.arcTo(x+w, y, x+w, y+h, r);
+    c.arcTo(x+w, y+h, x, y+h, r);
+    c.arcTo(x, y+h, x, y, r);
+    c.arcTo(x, y, x+w, y, r);
+    c.closePath();
+  }
+
+  function drawWheel(localX, localY, wLen, wWid, speedInput, phase){
+    ctx.save();
+    ctx.translate(localX, localY);
+    const dir = speedInput > 2 ? 1 : speedInput < -2 ? -1 : 0;
+    const fill = dir > 0 ? 'rgba(255,176,32,0.85)' : dir < 0 ? 'rgba(224,87,79,0.85)' : 'rgba(124,136,145,0.5)';
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, -wWid/2, -wLen/2, wWid, wLen, 3);
+    ctx.fill(); ctx.stroke();
+
+    ctx.save();
+    ctx.beginPath();
+    roundRect(ctx, -wWid/2, -wLen/2, wWid, wLen, 3);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(10,13,16,0.55)';
+    ctx.lineWidth = 1.5;
+    const step = 6;
+    const off = ((phase % step) + step) % step;
+    for(let t = -wLen; t < wLen*2; t += step){
+      const yy = -wLen + ((t + off) % (wLen*3));
+      ctx.beginPath();
+      ctx.moveTo(-wWid/2, yy - wWid/2);
+      ctx.lineTo(wWid/2, yy + wWid/2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawChassis(cw, ch){
+    const px = cw/2, py = ch/2;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(pose.theta);
+
+    const bodyW = geo.W*2 * PX_PER_M;
+    const bodyL = geo.L*2 * PX_PER_M;
+
+    ctx.fillStyle = '#171d23';
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, -bodyW/2, -bodyL/2, bodyW, bodyL, 8);
+    ctx.fill(); ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -bodyL/2 - 8);
+    ctx.lineTo(-7, -bodyL/2 + 4);
+    ctx.lineTo(7, -bodyL/2 + 4);
+    ctx.closePath();
+    ctx.fillStyle = '#ffb020';
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0,-bodyL/2); ctx.lineTo(0,bodyL/2);
+    ctx.stroke();
+
+    const wWid = Math.max(10, bodyW*0.16);
+    const wLen = Math.max(16, bodyL*0.30);
+
+    drawWheel(-bodyW/2, -bodyL/2 + wLen/2, wLen, wWid, wheels.FL, spinPhase.FL);
+    drawWheel( bodyW/2, -bodyL/2 + wLen/2, wLen, wWid, wheels.FR, spinPhase.FR);
+    drawWheel(-bodyW/2,  bodyL/2 - wLen/2, wLen, wWid, wheels.RL, spinPhase.RL);
+    drawWheel( bodyW/2,  bodyL/2 - wLen/2, wLen, wWid, wheels.RR, spinPhase.RR);
+
+    ctx.restore();
+  }
+
+  function render(){
+    const rect = canvas.getBoundingClientRect();
+    const cw = rect.width, ch = rect.height;
+    ctx.clearRect(0,0,cw,ch);
+    ctx.fillStyle = '#0a0d10';
+    ctx.fillRect(0,0,cw,ch);
+
+    drawGrid(cw, ch, pose.x, pose.y);
+    drawTrail(cw, ch, pose.x, pose.y);
+    drawChassis(cw, ch);
+  }
+
+  function step(dt){
+    const {vx, vy, omega} = computeVelocities();
+    const th = pose.theta;
+
+    const wx = vx*Math.sin(th) + vy*Math.cos(th);
+    const wy = -vx*Math.cos(th) + vy*Math.sin(th);
+
+    pose.x += wx*dt;
+    pose.y += wy*dt;
+    pose.theta += omega*dt;
+
+    const toRad = v => (v/255) * geo.maxRate;
+    spinPhase.FL += toRad(wheels.FL)*dt*40;
+    spinPhase.FR += toRad(wheels.FR)*dt*40;
+    spinPhase.RL += toRad(wheels.RL)*dt*40;
+    spinPhase.RR += toRad(wheels.RR)*dt*40;
+
+    trail.push({x:pose.x, y:pose.y});
+    if(trail.length > MAX_TRAIL) trail.shift();
+  }
+
+  function frame(t){
+    if(lastT === null) lastT = t;
+    let dt = (t - lastT)/1000;
+    dt = Math.min(dt, 0.05);
+    lastT = t;
+    if(running) step(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  Object.keys(wheels).forEach(updateWheelDisplay);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
