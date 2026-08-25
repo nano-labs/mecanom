@@ -457,6 +457,11 @@
           <div class="front-tag bottom">rear</div>
         </div>
 
+        <div class="hint" style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="toggle-traction" style="accent-color: var(--cyan); width:14px; height:14px; cursor:pointer;">
+          <label for="toggle-traction" style="cursor:pointer;">Show traction &amp; motion vectors</label>
+        </div>
+
         <details>
           <summary>Kinematics used</summary>
           <div class="formula"><span class="c">// worst case: |x|+|y|+|yaw| = 300 when all three are maxed => k = 3</span><br>
@@ -510,6 +515,11 @@ w = (input / 255) · maxRate<br><br>
   const btnPlay = document.getElementById('btn-play');
   const btnReset = document.getElementById('btn-reset');
   const stageStatus = document.getElementById('stage-status');
+
+  let showTractionVectors = false;
+  document.getElementById('toggle-traction').addEventListener('change', (e)=>{
+    showTractionVectors = e.target.checked;
+  });
 
   function updateWheelDisplay(k){
     const v = wheels[k];
@@ -768,6 +778,92 @@ w = (input / 255) · maxRate<br><br>
     ctx.restore();
   }
 
+  // Each wheel's roller orientation constrains its ground-contact force to a
+  // single fixed 45° line, regardless of what the chassis as a whole is
+  // doing. FL/RR share one diagonal (positive speed -> up-left); FR/RL
+  // share the other (positive speed -> up-right) — the classic mecanum "X"
+  // pattern. These are unit vectors in the same local frame the wheels are
+  // drawn in, before the whole chassis+wheels group is rotated.
+  const TRACTION_DIR = {
+    FL: [-Math.SQRT1_2, -Math.SQRT1_2],
+    RR: [-Math.SQRT1_2, -Math.SQRT1_2],
+    FR: [ Math.SQRT1_2, -Math.SQRT1_2],
+    RL: [ Math.SQRT1_2, -Math.SQRT1_2],
+  };
+
+  function drawArrow(fromX, fromY, toX, toY, color){
+    const headLen = 7;
+    const angle = Math.atan2(toY - fromY, toX - fromX);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(toX, toY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(toX, toY);
+    ctx.lineTo(toX - headLen*Math.cos(angle - Math.PI/6), toY - headLen*Math.sin(angle - Math.PI/6));
+    ctx.lineTo(toX - headLen*Math.cos(angle + Math.PI/6), toY - headLen*Math.sin(angle + Math.PI/6));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawTractionVector(localX, localY, dir, speedInput){
+    const maxLen = 46;
+    const len = Math.min(Math.abs(speedInput) / 255, 1) * maxLen;
+    if (len < 3) return; // negligible — skip the clutter
+    const sign = speedInput >= 0 ? 1 : -1;
+    const tipX = localX + dir[0]*len*sign;
+    const tipY = localY + dir[1]*len*sign;
+    drawArrow(localX, localY, tipX, tipY, 'rgba(95,212,255,0.95)');
+  }
+
+  function drawResultantVectors(){
+    const { vx, vy, omega } = computeVelocities();
+
+    // Theoretical max magnitudes at full wheel command, used to scale arrow/arc size.
+    const maxLinear = geo.r * geo.maxRate;
+    const maxOmega = (geo.r * geo.maxRate) / (geo.L + geo.W);
+
+    // --- combined translation vector: forward maps to local -Y, right to local +X ---
+    const mag = Math.hypot(vx, vy);
+    if (mag > 1e-4) {
+      const dirX = vy / mag;
+      const dirY = -vx / mag;
+      const maxArrowLen = 85;
+      const len = Math.min(mag / maxLinear, 1) * maxArrowLen;
+      if (len > 3) {
+        drawArrow(0, 0, dirX*len, dirY*len, '#ffb020');
+      }
+    }
+
+    // --- rotation indicator: curved arrow, clockwise for positive omega ---
+    const sweepFrac = Math.min(Math.abs(omega) / maxOmega, 1);
+    if (sweepFrac > 0.02) {
+      const radius = 26;
+      const startAngle = -Math.PI/2; // pointing up
+      const maxSweep = Math.PI * 1.5; // up to 270°
+      const sweep = sweepFrac * maxSweep;
+      const dirSign = omega >= 0 ? 1 : -1;
+      const endAngle = startAngle + dirSign*sweep;
+      const color = '#c792ea';
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, startAngle, endAngle, dirSign < 0);
+      ctx.stroke();
+
+      // Short arrowhead segment right at the tip, in the direction of travel —
+      // reuses drawArrow() rather than deriving the tangent analytically.
+      const preAngle = endAngle - dirSign*0.25;
+      const preX = radius*Math.cos(preAngle), preY = radius*Math.sin(preAngle);
+      const tipX = radius*Math.cos(endAngle), tipY = radius*Math.sin(endAngle);
+      drawArrow(preX, preY, tipX, tipY, color);
+    }
+  }
+
   function drawChassis(cw, ch){
     const px = cw/2, py = ch/2;
     ctx.save();
@@ -804,6 +900,14 @@ w = (input / 255) · maxRate<br><br>
     drawWheel( bodyW/2, -bodyL/2 + wLen/2, wLen, wWid, wheels.FR, spinPhase.FR);
     drawWheel(-bodyW/2,  bodyL/2 - wLen/2, wLen, wWid, wheels.RL, spinPhase.RL);
     drawWheel( bodyW/2,  bodyL/2 - wLen/2, wLen, wWid, wheels.RR, spinPhase.RR);
+
+    if (showTractionVectors) {
+      drawTractionVector(-bodyW/2, -bodyL/2 + wLen/2, TRACTION_DIR.FL, wheels.FL);
+      drawTractionVector( bodyW/2, -bodyL/2 + wLen/2, TRACTION_DIR.FR, wheels.FR);
+      drawTractionVector(-bodyW/2,  bodyL/2 - wLen/2, TRACTION_DIR.RL, wheels.RL);
+      drawTractionVector( bodyW/2,  bodyL/2 - wLen/2, TRACTION_DIR.RR, wheels.RR);
+      drawResultantVectors();
+    }
 
     ctx.restore();
   }

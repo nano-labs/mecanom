@@ -1,5 +1,22 @@
 #include <movingAvg.h>
 
+// Wheel speeds returned by mecanumDrive(), in the same [min_limit,max_limit]
+// domain as the RC channels — ready to pass straight into setSpeed().
+// Defined here, before anything else in the file (including the comment
+// block below), because Arduino auto-generates a forward declaration for
+// mecanumDrive() and inserts it near the very top of the translation unit.
+// If this struct were defined further down (as it originally was, right
+// before mecanumDrive() itself), that auto-generated prototype would
+// reference WheelSpeeds before the compiler had seen what it is —
+// "'WheelSpeeds' does not name a type". Defining it first avoids that
+// regardless of exactly where Arduino decides to insert prototypes.
+struct WheelSpeeds {
+  double frontLeft;
+  double frontRight;
+  double rearLeft;
+  double rearRight;
+};
+
 // =====================================================================
 //  MECANUM DRIVE — 4 motors, 4 angular position sensors, Futaba RC in
 // =====================================================================
@@ -27,6 +44,22 @@
 //      Python/JS mecanum_drive() developed and tested in the companion
 //      simulator. ch5 now selects the reserve percentage (BOOST/SAFE)
 //      instead of its old job of halving the raw stick inputs.
+//    - Added an RC failsafe: readChannel()/readFutaba() now detect a
+//      pulseIn() timeout (signal loss) per channel, and move() forces a
+//      hard stop instead of trusting whatever a timeout's zero reading
+//      happens to map to.
+//    - Replaced setSpeed()'s manual ramp (difference * differential,
+//      driven by ch3) with a real PI controller against the sensor-
+//      measured speed. Gains (PID_KP/PID_KI) are untuned placeholders —
+//      start low and tune by hand on real hardware. ch3 is no longer
+//      used for anything.
+//    - setup() previously only initialized motorPos[0]/motorLastReads[0]
+//      (regardless of DEBUG_MOTOR) using a *different* raw-to-position
+//      scale (0-850->0-360) than readSpeed()'s (0-900->0-3600) — both
+//      bugs fixed by checkSensorAtStartup(), which now seeds whichever
+//      motor(s) are actually expected to be connected, on the same
+//      scale readSpeed() uses, and warns over serial if a sensor
+//      doesn't respond at all.
 // =====================================================================
 
 
@@ -40,12 +73,14 @@ const int motorPosPins[4] = {32, 34, 36, 50}; // angular position sensors
 // ------------------------- RC receiver pins -------------------------
 // ch1: left horizontal stick
 // ch2: left vertical stick
-// ch3: right vertical stick   (repurposed below as a ramp/differential dial)
+// ch3: right vertical stick   (currently unused by drive mixing)
 // ch4: right horizontal stick
 // ch5: 2-position switch
 const int ch1_pin = 30;
-const int ch2_pin = 28;
-const int ch3_pin = 26;
+// const int ch2_pin = 28;
+const int ch2_pin = 26;
+// const int ch3_pin = 26;
+const int ch3_pin = 28;
 const int ch4_pin = 24;
 const int ch5_pin = 22;
 
@@ -93,23 +128,53 @@ movingAvg m4Avg(3);
 // ------------------------- RC channel values -------------------------
 int ch1 = 0, ch2 = 0, ch3 = 0, ch4 = 0, ch5 = 0;
 
-// ------------------------- Drive/ramp state -------------------------
-double differential = 0.0;
-int difference = 0;
+// Set once in setup() after Serial.begin(); print() only writes when this
+// is true, so calls are silently skipped if the serial connection never
+// came up (e.g. no host attached) instead of blocking/wasting cycles.
+bool serialReady = false;
+
+// ------------------------- RC failsafe -------------------------
+// Updated every readFutaba() call: true only if every channel's pulseIn()
+// got a real pulse this cycle. move() forces all motors to a hard stop
+// when this is false, rather than trusting whatever a pulseIn() timeout's
+// zero reading happens to map to.
+bool rcSignalValid = true;
+
+// ------------------------- Speed PI controller -------------------------
+// NOTE: these gains are untuned placeholders — they've never run on the
+// real hardware. Start low and increase gradually while watching for
+// oscillation/overshoot, the standard way to tune a PI loop by hand.
+const double PID_KP = 0.5;  // proportional gain
+const double PID_KI = 0.8;  // integral gain, per second
+const double PID_INTEGRAL_MAX = 255.0 / PID_KI; // anti-windup: caps the integral term's own contribution to a full-scale PWM swing
+
+double motorIntegral[4] = {0.0, 0.0, 0.0, 0.0};
+unsigned long motorLastDt[4] = {1, 1, 1, 1}; // ms; interval readSpeed() measured on its last call, per motor
 
 
 // =====================================================================
 //  SETUP
 // =====================================================================
+// Reads one motor's position sensor once at startup and seeds motorPos/
+// motorLastReads from it, warning if the sensor doesn't respond at all.
+// Uses the same 0-900 raw -> 0-3600 mapping as readSpeed(), so the very
+// first reading is on the same scale as every subsequent one.
+void checkSensorAtStartup(int idx) {
+  unsigned long raw = pulseIn(motorPosPins[idx], HIGH, PULSE_TIMEOUT);
+  if (raw == 0) {
+    print("WARNING: motor " + String(idx) + " position sensor not responding at startup.");
+  } else {
+    motorPos[idx] = constrain(map(raw, 0, 900, 0, 3600), 0, 3600);
+  }
+  motorLastReads[idx] = millis();
+}
+
 void setup() {
   for (int i = 0; i < 4; i++) {
     pinMode(motorPinA[i], OUTPUT);
     pinMode(motorPinB[i], OUTPUT);
     pinMode(motorEnable[i], OUTPUT);
   }
-
-  motorPos[0] = map(pulseIn(motorPosPins[0], HIGH, PULSE_TIMEOUT), 0, 850, 0, 360);
-  motorLastReads[0] = millis();
 
   pinMode(ch1_pin, INPUT);
   pinMode(ch2_pin, INPUT);
@@ -119,6 +184,18 @@ void setup() {
 
   Serial.begin(57600); // Pour a bowl of Serial
   delay(3000);
+  serialReady = (bool)Serial; // true once the connection is actually up
+
+  // Only self-check the sensor(s) actually expected to be wired up right
+  // now — checking all four during SINGLE_MOTOR_DEBUG would just spam
+  // false "not responding" warnings for the intentionally-disconnected ones.
+  if (SINGLE_MOTOR_DEBUG) {
+    checkSensorAtStartup(DEBUG_MOTOR);
+  } else {
+    for (int i = 0; i < 4; i++) {
+      checkSensorAtStartup(i);
+    }
+  }
 
   m1Avg.begin();
   m2Avg.begin();
@@ -128,16 +205,29 @@ void setup() {
 
 
 // =====================================================================
+//  SERIAL OUTPUT
+// =====================================================================
+
+// Only writes to Serial if the connection was confirmed up in setup();
+// use this instead of calling Serial.println() directly anywhere else.
+void print(const String &msg) {
+  if (serialReady) {
+    Serial.println(msg);
+  }
+}
+
+
+// =====================================================================
 //  MAIN LOOP
 // =====================================================================
 void loop() {
   move();
   int motor = SINGLE_MOTOR_DEBUG ? DEBUG_MOTOR : 0;
-  Serial.println("Motor:" + String(motor) +
-                  ",Speed:" + String(motorSpeeds[motor]) +
-                  ",Output:" + String(motorInputs[motor]) +
-                  ",Target:" + String(motorTargetSpeeds[motor]) +
-                  ",Delta:" + String(differential));
+  print("Motor:" + String(motor) +
+        ",Speed:" + String(motorSpeeds[motor]) +
+        ",Output:" + String(motorInputs[motor]) +
+        ",Target:" + String(motorTargetSpeeds[motor]) +
+        ",RC:" + String(rcSignalValid));
 }
 
 
@@ -158,9 +248,13 @@ int applyDeadband(int value, int deadband) {
 
 // Reads one RC channel, maps it into [outLow, outHigh] (order matters —
 // some channels are intentionally inverted), clamps it, and optionally
-// applies the deadband/rebase used for the four stick axes.
-int readChannel(int pin, int rawMin, int rawMax, int outLow, int outHigh, bool deadband) {
-  int value = map(pulseIn(pin, HIGH, PULSE_TIMEOUT), rawMin, rawMax, outLow, outHigh);
+// applies the deadband/rebase used for the four stick axes. If validOut is
+// given, it's set to false when pulseIn() timed out (raw reading of 0),
+// which readFutaba() uses to detect signal loss.
+int readChannel(int pin, int rawMin, int rawMax, int outLow, int outHigh, bool deadband, bool *validOut = nullptr) {
+  unsigned long raw = pulseIn(pin, HIGH, PULSE_TIMEOUT);
+  if (validOut) *validOut = (raw != 0);
+  int value = map(raw, rawMin, rawMax, outLow, outHigh);
   value = constrain(value, min(outLow, outHigh), max(outLow, outHigh));
   if (deadband) {
     value = applyDeadband(value, dead_center);
@@ -171,19 +265,33 @@ int readChannel(int pin, int rawMin, int rawMax, int outLow, int outHigh, bool d
 void readFutaba() {
   // ch1: left horizontal stick
   // ch2: left vertical stick
-  // ch3: right vertical stick
+  // ch3: right vertical stick   (currently unused by drive mixing — see note below)
   // ch4: right horizontal stick
   // ch5: 2-position switch
 
-  ch1 = readChannel(ch1_pin, ch1_min, ch1_max, min_limit, max_limit, true);
-  ch2 = readChannel(ch2_pin, ch2_min, ch2_max, max_limit, min_limit, true); // inverted
-  ch3 = readChannel(ch3_pin, ch3_min, ch3_max, max_limit, min_limit, true); // inverted
+  bool ch1Valid, ch2Valid, ch3Valid, ch4Valid, ch5Valid;
 
-  // ch3 repurposed here as a ramp/differential dial, not a drive axis
-  differential = map((float)ch3, (float)max_limit, (float)min_limit, 0.0, 100.0) / 200.0;
+  ch1 = readChannel(ch1_pin, ch1_min, ch1_max, min_limit, max_limit, true, &ch1Valid);
+  ch2 = readChannel(ch2_pin, ch2_min, ch2_max, max_limit, min_limit, true, &ch2Valid); // inverted
+  ch3 = readChannel(ch3_pin, ch3_min, ch3_max, max_limit, min_limit, true, &ch3Valid); // inverted
 
-  ch4 = readChannel(ch4_pin, ch4_min, ch4_max, min_limit, max_limit, true);
-  ch5 = readChannel(ch5_pin, ch5_min, ch5_max, min_limit, max_limit, false); // switch, no deadband
+  // ch3 previously drove a manual ramp-rate ("differential") dial; that's
+  // superseded now that setSpeed() uses a real PI controller instead of a
+  // manual ramp. ch3 is still read (and still counts toward the failsafe
+  // check below, since receiver channels typically drop out together) but
+  // isn't used for anything yet — available for e.g. live gain tuning later.
+
+  ch4 = readChannel(ch4_pin, ch4_min, ch4_max, min_limit, max_limit, true, &ch4Valid);
+  ch5 = readChannel(ch5_pin, ch5_min, ch5_max, min_limit, max_limit, false, &ch5Valid); // switch, no deadband
+
+  bool signalValidNow = ch1Valid && ch2Valid && ch3Valid && ch4Valid && ch5Valid;
+
+  if (signalValidNow && !rcSignalValid) {
+    print("RC signal restored.");
+  } else if (!signalValidNow && rcSignalValid) {
+    print("RC signal lost — stopping.");
+  }
+  rcSignalValid = signalValidNow;
 
   // Serial.println(String(ch1) +", "+ String(ch2) +", "+ String(ch3) +", "+ String(ch4) +", "+ String(ch5));
 }
@@ -209,9 +317,9 @@ void checkCalibration() {
     ch3_avg.reading(pulseIn(ch3_pin, HIGH, PULSE_TIMEOUT));
     ch4_avg.reading(pulseIn(ch4_pin, HIGH, PULSE_TIMEOUT));
     ch5_avg.reading(pulseIn(ch5_pin, HIGH, PULSE_TIMEOUT));
-    Serial.println(String(ch1_avg.getAvg()) + ", " + String(ch2_avg.getAvg()) + ", " +
-                    String(ch3_avg.getAvg()) + ", " + String(ch4_avg.getAvg()) + ", " +
-                    String(ch5_avg.getAvg()));
+    print(String(ch1_avg.getAvg()) + ", " + String(ch2_avg.getAvg()) + ", " +
+          String(ch3_avg.getAvg()) + ", " + String(ch4_avg.getAvg()) + ", " +
+          String(ch5_avg.getAvg()));
   }
 }
 
@@ -265,6 +373,10 @@ double readSpeed(int motor) {
       0, 3600);
   unsigned long new_read = millis();
 
+  unsigned long dt = new_read - motorLastReads[motor];
+  if (dt == 0) dt = 1; // guard against divide-by-zero if called twice in the same millisecond
+  motorLastDt[motor] = dt; // available to setSpeed()'s PI controller
+
   // True wraparound delta — no dependency on the commanded target, so this
   // reflects what the wheel is actually doing even while stopping, stalled,
   // or being pushed opposite to the commanded direction. Assumes motor
@@ -279,9 +391,6 @@ double readSpeed(int motor) {
     // computing a spurious instantaneous speed from jitter.
     speed = 0;
   } else {
-    unsigned long dt = new_read - motorLastReads[motor];
-    if (dt == 0) dt = 1; // guard against divide-by-zero if called twice in the same millisecond
-
     // Same empirical calibration as before (raw units/ms scaled so that
     // ~140 raw-units-per-10ms reads as full speed, i.e. 255).
     long magnitude = (abs((long)delta) * 10 * 255L) / (dt * 140L);
@@ -319,6 +428,8 @@ void setSpeed(int motor, int speed) {
   readSpeed(motor);
   motorTargetSpeeds[motor] = speed;
 
+  // Enforce a full stop before reversing direction, rather than snapping
+  // straight from one polarity's PWM output to the opposite one.
   if (speed > 0 && motorInputs[motor] < 0) {
     speed = 0;
   } else if (speed < 0 && motorInputs[motor] > 0) {
@@ -327,30 +438,20 @@ void setSpeed(int motor, int speed) {
 
   if (speed == 0) {
     motorInputs[motor] = 0;
-    motorSpeeds[motor] = 0;
-  } else if (abs(motorTargetSpeeds[motor] - motorSpeeds[motor]) > 2) {
-    difference = motorTargetSpeeds[motor] - motorSpeeds[motor];
-    difference = round(float(difference) * differential);
-    if (motorTargetSpeeds[motor] > 0 && difference < 2 && difference > 0) {
-      difference = 2;
-    } else if (motorTargetSpeeds[motor] < 0 && difference > -2 && difference < 0) {
-      difference = -2;
-    }
-    motorInputs[motor] = motorInputs[motor] + difference;
+    motorIntegral[motor] = 0.0; // avoid windup while stopped
+  } else {
+    double dtSeconds = motorLastDt[motor] / 1000.0;
+    double error = (double)speed - motorSpeeds[motor];
+
+    motorIntegral[motor] += error * dtSeconds;
+    motorIntegral[motor] = constrain(motorIntegral[motor], -PID_INTEGRAL_MAX, PID_INTEGRAL_MAX);
+
+    double output = PID_KP * error + PID_KI * motorIntegral[motor];
+    motorInputs[motor] = (int)constrain(output, -255.0, 255.0);
   }
 
-  motorInputs[motor] = constrain(motorInputs[motor], -255, 255);
   moveMotor(motor, motorInputs[motor]);
 }
-
-// Wheel speeds returned by mecanumDrive(), in the same [min_limit,max_limit]
-// domain as the RC channels — ready to pass straight into setSpeed().
-struct WheelSpeeds {
-  double frontLeft;
-  double frontRight;
-  double rearLeft;
-  double rearRight;
-};
 
 // Direct port of the verified Python mecanum_drive(x, y, yaw, reserve_percent),
 // adapted to operate directly in the RC channels' native [min_limit,max_limit]
@@ -401,13 +502,27 @@ void move() {
   //                                       backwards on the bench)
   // ch2: left vertical stick     -> x   (forward; already sign-corrected
   //                                       in readFutaba's inverted mapping)
-  // ch3: right vertical stick    -> ramp/differential dial, unrelated to mixing
+  // ch3: right vertical stick    -> currently unused by mixing
   // ch4: right horizontal stick  -> yaw (assumed positive = clockwise;
   //                                       flip sign below if reversed)
   // ch5: 2-position switch       -> reserve select (BOOST / SAFE)
 
   if (SINGLE_MOTOR_DEBUG) {
-    debugSingleMotor();
+    if (!rcSignalValid) {
+      setSpeed(DEBUG_MOTOR, 0); // failsafe, scoped to the one motor actually wired up
+    } else {
+      debugSingleMotor();
+    }
+    return;
+  }
+
+  if (!rcSignalValid) {
+    // Signal lost — force a hard stop rather than trusting whatever a
+    // pulseIn() timeout's zero reading happens to map to.
+    setSpeed(0, 0);
+    setSpeed(1, 0);
+    setSpeed(2, 0);
+    setSpeed(3, 0);
     return;
   }
 
