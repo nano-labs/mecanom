@@ -65,10 +65,10 @@ struct WheelSpeeds {
 
 // ------------------------- Motor pin assignments -------------------------
 // Index: 0 = back right, 1 = back left, 2 = front left, 3 = front right
-const int motorPinA[4]    = {6, 3, 12, 9};   // IN1 (0,2) / IN3 (1,3)
-const int motorPinB[4]    = {5, 4, 11, 10};  // IN2 (0,2) / IN4 (1,3)
-const int motorEnable[4]  = {7, 2, 13, 8};
-const int motorPosPins[4] = {32, 34, 36, 50}; // angular position sensors
+const int motorPinA[4]    = {6, 5, 3, 2};   // IN1 (0,2) / IN3 (1,3)
+const int motorPinB[4]    = {15, 16, 18, 19};  // IN2 (0,2) / IN4 (1,3)
+const int motorEnable[4]  = {7, 4, 14, 17};
+const int motorPosPins[4] = {13, 22, 52, 53}; // angular position sensors
 
 // ------------------------- RC receiver pins -------------------------
 // ch1: left horizontal stick
@@ -76,20 +76,20 @@ const int motorPosPins[4] = {32, 34, 36, 50}; // angular position sensors
 // ch3: right vertical stick   (currently unused by drive mixing)
 // ch4: right horizontal stick
 // ch5: 2-position switch
-const int ch1_pin = 30;
+const int ch1_pin = 8;
 // const int ch2_pin = 28;
-const int ch2_pin = 26;
+const int ch2_pin = 9;
 // const int ch3_pin = 26;
-const int ch3_pin = 28;
-const int ch4_pin = 24;
-const int ch5_pin = 22;
+const int ch3_pin = 10;
+const int ch4_pin = 11;
+const int ch5_pin = 12;
 
 // ------------------------- RC calibration (per channel) -------------------------
-int ch1_min = 1282, ch1_max = 1673;
-int ch2_min = 1274, ch2_max = 1695;
-int ch3_min = 1041, ch3_max = 1700;
-int ch4_min = 1278, ch4_max = 1705;
-int ch5_min = 987,  ch5_max = 1960;
+int ch1_min = 1254, ch1_max = 1691;
+int ch2_min = 1266, ch2_max = 1704;
+int ch3_min = 1047, ch3_max = 1676;
+int ch4_min = 1280, ch4_max = 1709;
+int ch5_min = 975,  ch5_max = 1952;
 
 // ------------------------- Control constants -------------------------
 const int dead_center = 50;
@@ -221,6 +221,7 @@ void print(const String &msg) {
 //  MAIN LOOP
 // =====================================================================
 void loop() {
+  // checkCalibration();
   move();
   int motor = SINGLE_MOTOR_DEBUG ? DEBUG_MOTOR : 0;
   print("Motor:" + String(motor) +
