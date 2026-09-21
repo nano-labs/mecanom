@@ -39,6 +39,9 @@ struct WheelSpeeds {
 //      bench. This replaces the old hardcoded `motor = 0;` override
 //      in readSpeed(), which has been removed — DEBUG_MOTOR is now
 //      the single place that selects which motor is under test.
+//      setup() also explicitly commands the other three motors to 0
+//      once at startup, rather than relying on their pins simply never
+//      being written to again.
 //    - move()'s old ad-hoc ch1/ch2/ch4 mixing branches are replaced by
 //      mecanumDrive(x, y, yaw, reservePercent), a verified port of the
 //      Python/JS mecanum_drive() developed and tested in the companion
@@ -63,12 +66,26 @@ struct WheelSpeeds {
 // =====================================================================
 
 
+// Issues:
+// m0 = drive correct - no position sensor reading at all (still investigating)
+// m1 = drive correct - sensor read inverted; corrected via sensorSign[] above
+// m2 = drive correct - sensor ok
+// m3 = drive correct - no position sensor reading at all (still investigating)
+
 // ------------------------- Motor pin assignments -------------------------
 // Index: 0 = back right, 1 = back left, 2 = front left, 3 = front right
-const int motorPinA[4]    = {6, 5, 3, 2};   // IN1 (0,2) / IN3 (1,3)
-const int motorPinB[4]    = {15, 16, 18, 19};  // IN2 (0,2) / IN4 (1,3)
-const int motorEnable[4]  = {7, 4, 14, 17};
-const int motorPosPins[4] = {13, 22, 52, 53}; // angular position sensors
+const int motorPinA[4]    = {3, 45, 6, 22};   // IN1 (0,2) / IN3 (1,3)
+const int motorPinB[4]    = {2, 30, 5, 24};  // IN2 (0,2) / IN4 (1,3)
+const int motorEnable[4]  = {4, 46, 7, 44};
+const int motorPosPins[4] = {13, 28, 52, 53}; // angular position sensors
+
+// Sign correction for each motor's POSITION SENSOR reading only — entirely
+// independent from motor drive polarity, which is handled by wiring (A/B
+// pins), not software. A sensor can report a decreasing angle for the same
+// physical spin direction that gives an increasing angle on another wheel,
+// purely because of how it happens to be mounted on that specific wheel.
+// This corrects that per-motor without touching how motors are driven.
+const int sensorSign[4] = {1, -1, 1, 1}; // motor 1's sensor reads inverted relative to its actual spin direction
 
 // ------------------------- RC receiver pins -------------------------
 // ch1: left horizontal stick
@@ -76,17 +93,17 @@ const int motorPosPins[4] = {13, 22, 52, 53}; // angular position sensors
 // ch3: right vertical stick   (currently unused by drive mixing)
 // ch4: right horizontal stick
 // ch5: 2-position switch
-const int ch1_pin = 8;
+const int ch1_pin = 11;
 // const int ch2_pin = 28;
 const int ch2_pin = 9;
 // const int ch3_pin = 26;
 const int ch3_pin = 10;
-const int ch4_pin = 11;
+const int ch4_pin = 8;
 const int ch5_pin = 12;
 
 // ------------------------- RC calibration (per channel) -------------------------
 int ch1_min = 1254, ch1_max = 1691;
-int ch2_min = 1266, ch2_max = 1704;
+int ch2_min = 1266, ch2_max = 1694;
 int ch3_min = 1047, ch3_max = 1676;
 int ch4_min = 1280, ch4_max = 1709;
 int ch5_min = 975,  ch5_max = 1952;
@@ -110,8 +127,8 @@ const double RESERVE_SAFE_PERCENT = 200.0 / 3.0; // ~66.67%
 // three motors' pins are never touched at all (no moveMotor(), no pulseIn()
 // on their position sensors). Safe to use with only one wheel wired up on
 // the bench and the rest fully unpowered/disconnected.
-const bool SINGLE_MOTOR_DEBUG = true;
-const int DEBUG_MOTOR = 0; // index of the motor currently on the bench
+const bool SINGLE_MOTOR_DEBUG = false;
+const int DEBUG_MOTOR = 1; // index of the motor currently on the bench
 
 // ------------------------- Motor state -------------------------
 double motorSpeeds[4]       = {0.0, 0.0, 0.0, 0.0};
@@ -174,6 +191,19 @@ void setup() {
     pinMode(motorPinA[i], OUTPUT);
     pinMode(motorPinB[i], OUTPUT);
     pinMode(motorEnable[i], OUTPUT);
+  }
+
+  // In single-motor bench mode, explicitly command every other motor to 0
+  // rather than relying on their pins simply never being touched again.
+  // moveMotor() only writes to the direction/enable pins (no pulseIn()),
+  // so this doesn't violate the "never touch a disconnected sensor" rule
+  // single-motor mode exists for.
+  if (SINGLE_MOTOR_DEBUG) {
+    for (int i = 0; i < 4; i++) {
+      if (i != DEBUG_MOTOR) {
+        moveMotor(i, 0);
+      }
+    }
   }
 
   pinMode(ch1_pin, INPUT);
@@ -341,7 +371,7 @@ void moveMotor(int idx, int speed) {
   } else {
     digitalWrite(motorPinA[idx], LOW);
     digitalWrite(motorPinB[idx], HIGH);
-    analogWrite(motorEnable[idx], -speed);
+    analogWrite(motorEnable[idx], -speed); // keep the enable/PWM value positive — direction comes from A/B, not sign
   }
 }
 
@@ -384,7 +414,7 @@ double readSpeed(int motor) {
   // wiring/polarity is set up so that a positive command moves every motor
   // "forward" (i.e. increases raw position) — adjust wiring, not software,
   // if a motor reads backwards.
-  int delta = circularDelta((long)motorPos[motor], (long)new_pos, 3600);
+  int delta = circularDelta((long)motorPos[motor], (long)new_pos, 3600) * sensorSign[motor];
 
   int speed;
   if (abs(delta) <= POSITION_NOISE_DEADBAND) {
