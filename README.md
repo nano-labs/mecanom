@@ -1,6 +1,8 @@
 # Omnidirectional driver
 
 ## Video
+Check on [Youtube](https://www.youtube.com/watch?v=RhC27RWYxq8)
+
 [![Watch the video](https://github.com/nano-labs/mecanom/blob/main/imgs/mec.gif)](https://www.youtube.com/watch?v=RhC27RWYxq8)
 
 ## Simulator
@@ -8,4 +10,5 @@
 
 ## 3D Models
 Check on [OnShape](https://cad.onshape.com/documents/400e24b68b89f4bcfb514749/w/5fd1d2b0ab296c37dc10a298/e/c18db2eab22e172bc525fd46)
+
 [![OnShape](https://github.com/nano-labs/mecanom/blob/main/imgs/onshape.png)](https://cad.onshape.com/documents/400e24b68b89f4bcfb514749/w/5fd1d2b0ab296c37dc10a298/e/c18db2eab22e172bc525fd46)
