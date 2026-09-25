@@ -66,12 +66,6 @@ struct WheelSpeeds {
 // =====================================================================
 
 
-// Issues:
-// m0 = drive correct - no position sensor reading at all (still investigating)
-// m1 = drive correct - sensor read inverted; corrected via sensorSign[] above
-// m2 = drive correct - sensor ok
-// m3 = drive correct - no position sensor reading at all (still investigating)
-
 // ------------------------- Motor pin assignments -------------------------
 // Index: 0 = back right, 1 = back left, 2 = front left, 3 = front right
 const int motorPinA[4]    = {3, 45, 6, 22};   // IN1 (0,2) / IN3 (1,3)
@@ -85,7 +79,7 @@ const int motorPosPins[4] = {13, 28, 52, 53}; // angular position sensors
 // physical spin direction that gives an increasing angle on another wheel,
 // purely because of how it happens to be mounted on that specific wheel.
 // This corrects that per-motor without touching how motors are driven.
-const int sensorSign[4] = {1, -1, 1, 1}; // motor 1's sensor reads inverted relative to its actual spin direction
+const int sensorSign[4] = {1, -1, 1, -1}; // motor 1's sensor reads inverted relative to its actual spin direction
 
 // ------------------------- RC receiver pins -------------------------
 // ch1: left horizontal stick
@@ -128,7 +122,7 @@ const double RESERVE_SAFE_PERCENT = 200.0 / 3.0; // ~66.67%
 // on their position sensors). Safe to use with only one wheel wired up on
 // the bench and the rest fully unpowered/disconnected.
 const bool SINGLE_MOTOR_DEBUG = false;
-const int DEBUG_MOTOR = 1; // index of the motor currently on the bench
+const int DEBUG_MOTOR = 2; // index of the motor currently on the bench
 
 // ------------------------- Motor state -------------------------
 double motorSpeeds[4]       = {0.0, 0.0, 0.0, 0.0};
